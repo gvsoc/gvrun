@@ -1,0 +1,53 @@
+{
+    "sections": [
+        {
+            "name": "rom",
+            "template": "rom_v2",
+            "properties": {
+                "binary": null,
+                "boot": false
+            }
+        },
+        {
+            "name": "partition_table",
+            "template": "partition table"
+        },
+        {
+            "name": "app_binary",
+            "template": "app binary",
+            "properties": {
+                "binary": null
+            }
+        },
+        {
+            "name": "readfs",
+            "template": "readfs",
+            "properties": {
+                "files": []
+            }
+        },
+        {
+            "name": "hostfs",
+            "template": "hostfs",
+            "properties": {
+                "files": []
+            }
+        },
+        {
+            "name": "lfs",
+            "template": "lfs",
+            "properties": {
+                "size": 0,
+                "root_dir": null,
+                "img_path": null
+            }
+        },
+        {
+            "name": "raw",
+            "template": "raw",
+            "properties": {
+                "size": -1
+            }
+        }
+    ]
+}

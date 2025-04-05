@@ -1,0 +1,120 @@
+#!/usr/bin/env python3
+
+#
+# Copyright (C) 2025 Germain Haugou
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+#
+# Authors: Germain Haugou (germain.haugou@gmail.com)
+#
+
+
+import argparse
+import logging
+import sys
+import gvrun.target
+import gvrun.commands
+
+# Generic gapy options, all for specifying the target and its options
+parser = argparse.ArgumentParser(description='Execute commands on the target',
+    formatter_class=argparse.RawDescriptionHelpFormatter, add_help=False)
+
+parser.add_argument('command', metavar='CMD', type=str, nargs='*',
+                    help='a command to be executed (execute the command "commands" to '
+                    'get the list of commands)')
+
+parser.add_argument("--target", dest="target", default=None, help="specify the target")
+
+parser.add_argument("--target-dir", dest="target_dirs", default=[], action="append",
+    help="append the specified directory to the list of directories where to look for targets")
+
+parser.add_argument("--target-property", dest="target_properties", default=[],
+    action="append", help="specify the value of a target property")
+
+parser.add_argument('--verbose', dest='verbose', type=str, default='critical', choices=[
+    'debug', 'info', 'warning', 'error', 'critical'],
+    help='Specifies verbose level.')
+
+parser.add_argument('--py-stack', dest='py_stack', action="store_true",
+    help='Show python exception stack.')
+
+parser.add_argument("--model-dir", dest="install_dirs", action="append",
+    type=str, help="specify an installation path where to find models (only for GVSOC)")
+
+parser.add_argument('--build-dir',  dest='build_dir', default='build',
+    help='Specifies build directory.')
+
+parser.add_argument("--jobs", "-j", dest="jobs", default=-1, type=int,
+    help="Specify the number of worker threads")
+
+parser.add_argument("--property", dest="properties", default=[],
+    action="append", help="specify the value of a build property")
+
+parser.add_argument("--platform", dest="platform", required=True,
+    choices=['fpga', 'board', 'rtl', 'gvsoc'],
+    type=str, help="specify the platform used for the target")
+
+# Do a first argument parse so that we can get the target and add more arguments, depending on
+# the target
+[args, otherArgs] = parser.parse_known_args()
+
+try:
+
+    logging.basicConfig(level=getattr(logging, args.verbose.upper(), None),
+        format='\033[94m[GAPY]\033[0m %(asctime)s - %(levelname)s - %(message)s')
+
+    # Targets will be imported as python modules so the specified target directories must be
+    # appended to the python path
+    sys.path = args.target_dirs + sys.path
+
+    # Instantiate the specified target or if no target is specified, instantiate an empty one
+    # since we need a target to handle commands
+    target = None
+    if args.target is not None:
+        # Check if the target name has target properties inlined and if so, inject them
+        # into the list of target properties
+        target_name = args.target
+        target_properties = []
+        if target_name.find(':') != -1:
+            target_name, target_properties = target_name.split(':')
+            args.target_properties.append(target_properties)
+
+        target = gvrun.target.get_target(target_name)(
+            parser=parser, options=None
+        )
+
+    # target.set_target_dirs(args.target_dirs)
+
+    # Let the target add its options, and then reparse them
+    # target.append_args(parser)
+
+    parser = argparse.ArgumentParser(
+        parents=[parser],
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+
+    args = parser.parse_args()
+    # target.parse_args(args)
+    # target.check_args()
+
+    # Finally ask the target to handle the commands
+    gvrun.commands.handle_commands(target, args)
+
+except RuntimeError as e:
+    if args.py_stack:
+        raise
+
+    print('Input error: ' + str(e), file = sys.stderr)
+    sys.exit(1)
