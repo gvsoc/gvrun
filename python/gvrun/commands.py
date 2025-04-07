@@ -29,6 +29,8 @@ import queue
 import shutil
 
 user_properties = {}
+target_properties = {}
+configured_after_compile = False
 
 commands = [
     ['commands'    , 'Show the list of available commands'],
@@ -48,6 +50,9 @@ commands = [
 
 def get_user_property(name):
     return user_properties.get(name)
+
+def get_target_property(name):
+    return target_properties.get(name)
 
 def import_config(name):
 
@@ -70,15 +75,16 @@ def import_config(name):
 def load_config(target, args):
     global user_properties
 
-    for prop in args.properties:
-        key, value = prop.split('=', 1)
-        if user_properties.get(key) is not None:
-            if isinstance(user_properties.get(key), list):
-                user_properties[key].append(value)
+    for prop_array in args.properties:
+        for prop in prop_array.split(','):
+            key, value = prop.split('=', 1)
+            if user_properties.get(key) is not None:
+                if isinstance(user_properties.get(key), list):
+                    user_properties[key].append(value)
+                else:
+                    user_properties[key] = [user_properties.get(key), value]
             else:
-                user_properties[key] = [user_properties.get(key), value]
-        else:
-            user_properties[key] = value
+                user_properties[key] = value
 
     target.declare_property('platform', args.platform, 'Platform providing the target')
     target.declare_property('builddir', args.build_dir, 'Build directory')
@@ -105,26 +111,59 @@ def compile(target, args):
 
 def handle_command(target, command, args):
 
+    global configured_after_compile
+
+    if command == 'clean':
+        shutil.rmtree(args.build_dir, ignore_errors=True)
+        return
+
     if command == 'properties':
         dump_properties(target)
-    elif command == 'target_properties':
+        return
+
+    if command == 'target_properties':
         target.dump_target_properties()
-    elif command == 'compile':
+        return
+
+    if command in ['compile', 'all', 'build']:
         compile(target, args)
-    elif command == 'clean':
-        shutil.rmtree(args.build_dir, ignore_errors=True)
-    elif command == 'run':
+        if command == 'compile':
+            return
+
+    if not configured_after_compile:
+        configured_after_compile = True
+        target.configure_after_compile_all()
+
+    if command == 'flash_layout':
+        target.dump_flash_layout_walk(args.layout_level)
+        return
+
+    if command in ['image', 'all', 'build']:
+        target.model.generate_all(args.build_dir)
+        if command == 'image':
+            return
+
+    if command in ['run', 'all']:
         target.model.generate_all(args.build_dir)
         target.run(args)
-    elif command in ['components', 'image', 'flash']:
+        if command == 'run':
+            return
+
+    if command in ['components', 'flash']:
         target.handle_command(command, args)
 
 
 def handle_commands(target, args):
 
+    global target_properties
+
+    for prop in args.target_properties:
+        key, value = prop.split('=', 1)
+        target_properties[key] = value
+
     commands = args.command
 
-    if 'properties' in commands or 'compile' in commands:
+    if 'properties' in commands or 'compile' in commands or 'all' in commands or 'build' in commands:
         load_config(target.model, args)
 
     for command in commands:
@@ -248,3 +287,26 @@ def get_abspath(args, relpath: str) -> str:
             return os.path.abspath(relpath)
 
         return os.path.join(args.build_dir, relpath)
+
+def add_subdirectory(name, target):
+    module = import_config(os.path.join(name, 'config.py'))
+    module.declare(target)
+
+
+def import_config(name):
+
+    logging.debug(f'Importing config (name: {name})')
+
+    if not os.path.isabs(name):
+        name = os.path.join(os.getcwd(), name)
+
+    try:
+        spec = importlib.util.spec_from_file_location(name, name)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules["module.name"] = module
+        spec.loader.exec_module(module)
+
+    except FileNotFoundError as exc:
+        raise RuntimeError('Unable to open test configuration file: ' + name)
+
+    return module

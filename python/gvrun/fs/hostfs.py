@@ -23,7 +23,7 @@
 
 import os.path
 import shutil
-from gapylib.flash import FlashSection, Flash
+from gvrun.flash import FlashSection, Flash
 
 
 
@@ -34,7 +34,7 @@ class HostfsSection(FlashSection):
 
     Attributes
     ----------
-    parent: gapylib.flash.Flash
+    parent: gvrun.flash.Flash
         Name of the section.
     name : str
         Name of the section.

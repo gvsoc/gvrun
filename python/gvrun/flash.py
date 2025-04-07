@@ -51,19 +51,18 @@ from typing import Any, Dict
 
 from prettytable import PrettyTable
 
-from gvrun.fs.littlefs import LfsSection
-from gvrun.fs.readfs import ReadfsSection
-from gvrun.fs.writefs import WriteFsSection
-from gvrun.fs.hostfs import HostfsSection
-from gvrun.fs.raw import RawSection
-import gvrun.chips.gap.rom_v2
-import gvrun.chips.gap.rom_v3
-from gvrun.chips.gap.meta_table import FsblMetaTableSection
-from gvrun.fs.partition import PartitionTableSection
-from gvrun.fs.partition_v2 import PartitionTableSectionV2
-from gvrun.fs.app_bin import AppBinarySection
-from gvrun.fs.volume_table import VolumeTableSection
-from gvrun.fs.secret_storage import SecretStorageSection
+# from gvrun.fs.littlefs import LfsSection
+# from gvrun.fs.readfs import ReadfsSection
+# from gvrun.fs.writefs import WriteFsSection
+# from gvrun.fs.hostfs import HostfsSection
+# from gvrun.fs.raw import RawSection
+# import gvrun.chips.gap.rom_v3
+# from gvrun.chips.gap.meta_table import FsblMetaTableSection
+# from gvrun.fs.partition import PartitionTableSection
+# from gvrun.fs.partition_v2 import PartitionTableSectionV2
+# from gvrun.fs.app_bin import AppBinarySection
+# from gvrun.fs.volume_table import VolumeTableSection
+# from gvrun.fs.secret_storage import SecretStorageSection
 
 class FlashSectionProperty():
     """
@@ -116,6 +115,9 @@ class FlashSection():
         self.declare_property(name='size', value=None,
             description="Force a certain size for section."
         )
+
+    def configure_after_compile(self):
+        pass
 
     def declare_property(self, name: str, value: any, description: str):
         """Declare a section property.
@@ -493,7 +495,7 @@ class FlashSection():
         """
         return self.get_flash().get_name() + "-" + self.get_name() + ".bin"
 
-    def get_image_path(self) -> str:
+    def get_image_path(self, builddir) -> str:
         """Get the section image path
 
         Returns
@@ -501,7 +503,7 @@ class FlashSection():
         str
             The section image path
         """
-        return self.get_flash().target.get_abspath(self.get_image_name())
+        return os.path.join(builddir, self.get_image_name())
 
     def dump_section_description(self) -> Dict[str, Any]:
         """Dump the description of a section
@@ -527,8 +529,9 @@ class FlashSection():
         return section_desc
 
 
-class FlashGenerator():
-    def __init__(self, target):
+class Flash():
+    def __init__(self, target, name):
+        self.name = name
         self.target = target
         self.size = target.size
         self.sections_templates = {}
@@ -536,30 +539,20 @@ class FlashGenerator():
         self.content_dict = None
         self.content_parsed = False
         self.properties = {}
-        # if image_name is None:
-        self.image_name = 'dummy.bin'
-        # else:
-        #     self.image_name = image_name
-        #
-        #
+        full_name = target.get_path().replace('/', '.')
+        self.image_name = f'{full_name}.bin'
 
-        self.register_section_template('rom_v2', gvrun.chips.gap.rom_v2.RomFlashSection)
-        self.register_section_template('rom_v3', gvrun.chips.gap.rom_v3.RomFlashSection)
-        self.register_section_template('app binary', AppBinarySection)
-        self.register_section_template('meta table', FsblMetaTableSection)
-        self.register_section_template('partition table', PartitionTableSection)
-        self.register_section_template('partition table v2', PartitionTableSectionV2)
-        self.register_section_template('volume table', VolumeTableSection)
-        self.register_section_template('secret storage', SecretStorageSection)
-        self.register_section_template('readfs', ReadfsSection)
-        self.register_section_template('writefs', WriteFsSection)
-        self.register_section_template('hostfs', HostfsSection)
-        self.register_section_template('lfs', LfsSection)
-        self.register_section_template('raw', RawSection)
+    def generate_image(self, builddir):
+        if not self.is_empty():
+            sections = self.get_sections()
 
-        template = target.get_target_property('template')
+            first_index = 0
+            index_to_last= 0
+            while sections[-1 - index_to_last].is_empty():
+                index_to_last+=1
 
-        self.__parse_content(template)
+            self.dump_image(builddir, first_index, len(sections)-1-index_to_last)
+
 
     def get_name(self) -> str:
         """Return the name of the flash.
@@ -627,7 +620,7 @@ class FlashGenerator():
         self.sections_templates[template_name] = section_template
 
 
-    def dump_layout(self, level: int):
+    def dump_layout(self, level: int=0):
         """Dump the layout of the flash.
 
         Parameters
@@ -739,7 +732,7 @@ class FlashGenerator():
         print (table)
 
 
-    def dump_image(self, first: int=None, last: int=None):
+    def dump_image(self, builddir, first: int=None, last: int=None):
         """Dump the content of the flash in binary form to the specified file.
         May dump only a subset if first and last are parameters are used.
 
@@ -751,7 +744,7 @@ class FlashGenerator():
             Last section to be dumped
         """
         try:
-            with open(self.get_image_path(), 'wb') as file_desc:
+            with open(self.get_image_path(builddir), 'wb') as file_desc:
                 file_desc.write(self.get_image(first,last))
         except OSError as exc:
             raise RuntimeError('Unable to open flash image for '
@@ -792,7 +785,7 @@ class FlashGenerator():
         return result
 
 
-    def get_image_path(self) -> str:
+    def get_image_path(self, builddir) -> str:
         """Return the path of the file containing the flash image.
 
         Returns
@@ -800,7 +793,7 @@ class FlashGenerator():
         str
             The image file path.
         """
-        return self.target.get_abspath(self.get_image_name())
+        return os.path.join(builddir, self.get_image_name())
 
 
     def get_flash_attribute(self, name: str) -> any:
@@ -913,7 +906,7 @@ class FlashGenerator():
         return self.sections_templates.get(template_name)
 
 
-    def __parse_content(self, template_path, check_overflow: bool=True):
+    def parse_content(self, template_path, check_overflow: bool=True):
 
         if template_path is None:
             return
@@ -968,12 +961,14 @@ class FlashGenerator():
                             f' 0x{flash_offset:x}.')
                     break
 
+    def configure_after_compile(self):
+        for section in self.sections.values():
+            section.configure_after_compile()
+
         # And finally set the content of each section and give it its starting offset
-        if content_dict.get('sections') is not None:
-            flash_offset = 0
-            for content_section in content_dict.get('sections'):
-                section = self.sections[content_section.get('name')]
-                section.finalize()
+        for section in self.sections.values():
+            section.finalize()
+
 
     def get_flash_type(self):
         return self.target.type

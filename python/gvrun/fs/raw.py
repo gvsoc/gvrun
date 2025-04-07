@@ -21,8 +21,8 @@
 
 
 
-from gapylib.flash import FlashSection, Flash
-from gapylib.utils import CStruct, CStructParent
+from gvrun.flash import FlashSection, Flash
+from gvrun.utils import CStruct, CStructParent
 
 
 
@@ -52,7 +52,7 @@ class RawSection(FlashSection):
 
     Attributes
     ----------
-    parent: gapylib.flash.Flash
+    parent: gvrun.flash.Flash
         Name of the section.
     name : str
         Name of the section.

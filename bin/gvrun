@@ -20,24 +20,37 @@
 # Authors: Germain Haugou (germain.haugou@gmail.com)
 #
 
-
+import os
 import argparse
 import logging
 import sys
 import gvrun.target
 import gvrun.commands
 
+default_target = os.environ.get('GVRUN_TARGET')
+default_target_dirs = os.environ.get('GVRUN_TARGET_DIRS')
+if default_target_dirs is None:
+    default_target_dirs = []
+else:
+    default_target_dirs = default_target_dirs.split(':')
+default_model_dirs = os.environ.get('GVRUN_MODEL_DIRS')
+if default_model_dirs is None:
+    default_model_dirs = []
+else:
+    default_model_dirs = default_model_dirs.split(':')
+default_platform = os.environ.get('GVRUN_PLATFORM')
+
 # Generic gapy options, all for specifying the target and its options
 parser = argparse.ArgumentParser(description='Execute commands on the target',
-    formatter_class=argparse.RawDescriptionHelpFormatter, add_help=False)
+    formatter_class=argparse.ArgumentDefaultsHelpFormatter, add_help=False)
 
 parser.add_argument('command', metavar='CMD', type=str, nargs='*',
                     help='a command to be executed (execute the command "commands" to '
                     'get the list of commands)')
 
-parser.add_argument("--target", dest="target", default=None, help="specify the target")
+parser.add_argument("--target", '-t', dest="target", default=default_target, help="specify the target")
 
-parser.add_argument("--target-dir", dest="target_dirs", default=[], action="append",
+parser.add_argument("--target-dir", dest="target_dirs", default=default_target_dirs, action="append",
     help="append the specified directory to the list of directories where to look for targets")
 
 parser.add_argument("--target-property", dest="target_properties", default=[],
@@ -50,25 +63,33 @@ parser.add_argument('--verbose', dest='verbose', type=str, default='critical', c
 parser.add_argument('--py-stack', dest='py_stack', action="store_true",
     help='Show python exception stack.')
 
-parser.add_argument("--model-dir", dest="install_dirs", action="append",
+parser.add_argument("--model-dir", dest="install_dirs", action="append", default=default_model_dirs,
     type=str, help="specify an installation path where to find models (only for GVSOC)")
 
-parser.add_argument('--build-dir',  dest='build_dir', default='build',
+parser.add_argument('--build-dir',  dest='build_dir', default=f'{os.getcwd()}/build',
     help='Specifies build directory.')
 
 parser.add_argument("--jobs", "-j", dest="jobs", default=-1, type=int,
     help="Specify the number of worker threads")
 
-parser.add_argument("--property", dest="properties", default=[],
+parser.add_argument("--property", '-p', dest="properties", default=[],
     action="append", help="specify the value of a build property")
 
-parser.add_argument("--platform", dest="platform", required=True,
+parser.add_argument("--flash-layout-level", dest="layout_level", type=int, default=2,
+    help="specify the level of the layout when dumping flash layout")
+
+parser.add_argument("--platform", dest="platform", default=default_platform,
+    required=default_platform is None,
     choices=['fpga', 'board', 'rtl', 'gvsoc'],
     type=str, help="specify the platform used for the target")
 
 # Do a first argument parse so that we can get the target and add more arguments, depending on
 # the target
 [args, otherArgs] = parser.parse_known_args()
+
+if args.target.find('./') == 0:
+    args.target = args.target[2:]
+    args.target_dirs.append(os.getcwd())
 
 try:
 
@@ -102,7 +123,7 @@ try:
 
     parser = argparse.ArgumentParser(
         parents=[parser],
-        formatter_class=argparse.RawDescriptionHelpFormatter,
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
     args = parser.parse_args()

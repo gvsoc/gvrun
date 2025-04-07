@@ -20,13 +20,13 @@
 # Authors: Germain Haugou, GreenWaves Technologies (germain.haugou@greenwaves-technologies.com)
 #
 
-
+import os.path
 import typing
 import dataclasses
 from elftools.elf.elffile import ELFFile
-from gapylib.flash import FlashSection, Flash
-from gapylib.utils import CStruct, CStructParent
-
+from gvrun.flash import FlashSection, Flash
+from gvrun.utils import CStruct, CStructParent
+import gvrun.target
 
 
 @dataclasses.dataclass
@@ -328,13 +328,29 @@ class RomFlashSection(FlashSection):
         self.header = None
         self.boot = False
 
-        self.declare_property(name='binary', value=None,
-            description="Executable to be loaded by the ROM."
+        # self.declare_property(name='binary', value=None,
+        #     description="Executable to be loaded by the ROM."
+        # )
+
+        parent.target.declare_target_property(
+            gvrun.target.Property(
+                name=f'{name}.binary', value=parent.target.binaries[0],
+                path=self.parent.target.get_path(),
+                description="Executable to be loaded by the ROM."
+            )
         )
 
-        self.declare_property(name='boot', value=False,
-            description="True if the ROM will boot using this ROM section."
+        parent.target.declare_target_property(
+            gvrun.target.Property(
+                name=f'{name}.boot', value=False,
+                path=self.parent.target.get_path(),
+                description="True if the ROM will boot using this ROM section."
+            )
         )
+
+        # self.declare_property(name='boot', value=False,
+        #     description="True if the ROM will boot using this ROM section."
+        # )
 
         self.declare_property(name='subtype', value=None,
             description="Subtype of the binary partition, ssbl, fsbl or any."
@@ -409,10 +425,11 @@ class RomFlashSection(FlashSection):
         """
         super().set_content(offset, content_dict)
 
+    def configure_after_compile(self):
         # First parse the ELF binary if any
         self.binary = self.__parse_binary()
 
-        self.boot = self.get_property('boot')
+        self.boot = self.parent.target.get_target_property(f'{self.name}.boot')
 
         # Then declare the sub-sections so that the right offsets are computed
 
@@ -532,9 +549,10 @@ class RomFlashSection(FlashSection):
 
 
     def __parse_binary(self):
-        binary_path = self.get_property('binary')
 
-        if binary_path is not None:
+        binary_path = self.parent.target.get_target_property(f'{self.name}.binary')
+
+        if binary_path is not None and os.path.exists(binary_path):
             try:
                 with open(binary_path, "rb") as file_desc:
                     binary = Binary(file_desc)

@@ -22,8 +22,8 @@
 
 
 import math
-from gapylib.chips.gap.gap9_v2 import efuse_generator
-import gapylib.target
+from gvrun.chips.gap.gap9_v2 import efuse_generator
+import gvrun.target
 
 
 class EfuseGen():
@@ -32,7 +32,7 @@ class EfuseGen():
 
     Attributes
     ----------
-    target : gapylib.target
+    target : gvrun.target
         Gapy target for which the efuse map is generated.
 
     path: str
@@ -40,7 +40,7 @@ class EfuseGen():
         component.
     """
 
-    def __init__(self, target: gapylib.target, path:str=None):
+    def __init__(self, target: gvrun.target, path:str=None):
         self.target = target
         self.efuse_map = None
         self.path = path

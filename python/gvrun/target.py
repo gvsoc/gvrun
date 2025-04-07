@@ -24,6 +24,7 @@ import inspect
 import rich.table
 import traceback
 import gvrun.commands
+from abc import ABC, abstractmethod
 
 def get_target(target: str) -> 'Target':
     """Returns the class implementing the support for the specified target.
@@ -64,6 +65,12 @@ def get_target(target: str) -> 'Target':
     raise RuntimeError(f'Could not find any Gapy Target class in target: {target}')
 
 
+class BinaryLoader(ABC):
+
+    @abstractmethod
+    def register_binary(self, binary):
+        pass
+
 class SystemTreeNode:
 
     def __init__(self, name, parent=None):
@@ -71,13 +78,37 @@ class SystemTreeNode:
         self.childs = []
         self.build_properties = {}
         self.target_properties = {}
+        self.target_properties_values = {}
         self.executables = []
         self.parent = parent
+        self.binary_loaders = []
         if parent is not None:
             self.path = f'{parent.get_path()}/{name}'
             parent.childs.append(self)
         else:
             self.path = f'{name}'
+
+    def configure_after_compile(self):
+        pass
+
+    def configure_after_compile_all(self):
+        for child in self.childs:
+            child.configure_after_compile_all()
+
+        self.configure_after_compile()
+
+    def add_binary_loader(self, loader):
+        self.binary_loaders.append(loader)
+
+    def dump_flash_layout(self, layout_level):
+        pass
+
+    def dump_flash_layout_walk(self, layout_level):
+        for child in self.childs:
+            child.dump_flash_layout_walk(layout_level)
+
+        self.dump_flash_layout(layout_level)
+
 
     def get_property(self, name):
         return None
@@ -122,22 +153,24 @@ class SystemTreeNode:
 
         self.target_properties[descriptor.name] = descriptor
 
-        # arg = self.args_properties.get(descriptor.full_name)
-        # if arg is not None:
-        #     if descriptor.allowed_values is not None:
-        #         if arg not in descriptor.allowed_values:
-        #             raise RuntimeError(f'Trying to set target property to invalid value '
-        #                 f'(name: {descriptor.full_name}, value: {arg}, '
-        #                 f'allowed_values: {", ".join(descriptor.allowed_values)})')
+        arg = gvrun.commands.get_target_property(descriptor.full_name)
+        if arg is None:
+            arg = self.target_properties_values.get(descriptor.name)
+        if arg is not None:
+            if descriptor.allowed_values is not None:
+                if arg not in descriptor.allowed_values:
+                    raise RuntimeError(f'Trying to set target property to invalid value '
+                        f'(name: {descriptor.full_name}, value: {arg}, '
+                        f'allowed_values: {", ".join(descriptor.allowed_values)})')
 
-        #     if descriptor.cast is not None:
-        #         if descriptor.cast == int:
-        #             if isinstance(arg, str):
-        #                 arg = int(arg, 0)
-        #             else:
-        #                 arg = int(arg)
+            if descriptor.cast is not None:
+                if descriptor.cast == int:
+                    if isinstance(arg, str):
+                        arg = int(arg, 0)
+                    else:
+                        arg = int(arg)
 
-        #     descriptor.value = arg
+            descriptor.value = arg
 
     def has_target_properties(self):
         if len(self.target_properties) != 0:
@@ -164,12 +197,12 @@ class SystemTreeNode:
             table.add_column('Allowed values')
             table.add_column('Description')
 
-            for prop_full_name, prop in self.target_properties.items():
+            for prop_name, prop in self.target_properties.items():
+                prop_full_name = prop.full_name
                 value_str = prop.value
                 if prop.format is not None:
                     value_str = prop.format % prop.value
                 value_str = str(value_str)
-                prop_name = prop_full_name.split('/')[-1]
 
                 if prop.allowed_values is None:
                     if prop.cast == int:
@@ -189,6 +222,9 @@ class SystemTreeNode:
     def add_executable(self, executable):
         self.executables.append(executable)
 
+        for loader in self.binary_loaders:
+            loader.register_binary(executable.binary)
+
     def get_executables(self):
         executables = []
         executables += self.executables
@@ -203,7 +239,10 @@ class SystemTreeNode:
             comp, prop_name = name.split('/', 1)
             return self.get_component(comp).set_target_property(prop_name, value)
 
-        self.target_properties[name].value = value
+        if self.target_properties.get(name) is None:
+            self.target_properties_values[name] = value
+        else:
+            self.target_properties[name].value = value
 
 
 
@@ -272,8 +311,8 @@ class Component(SystemTreeNode):
         else:
             return self.build_properties.get(name).value
 
-        def set_build_property(self, name, value):
-            self.build_properties.get(name).value = value
+    def set_build_property(self, name, value):
+        self.build_properties.get(name).value = value
 
     def has_build_properties(self):
         if len(self.executables) != 0:
@@ -317,9 +356,6 @@ class Component(SystemTreeNode):
     def build(self, builder, builddir):
         for child in self.childs:
             child.build(builder, builddir)
-
-        for executable in self.executables:
-            executable.build(builder, builddir)
 
 
 class Target(SystemTreeNode):
