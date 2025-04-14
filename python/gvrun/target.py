@@ -88,6 +88,24 @@ class SystemTreeNode:
         else:
             self.path = f'{name}'
 
+    def target_prepare(self):
+        pass
+
+    def target_prepare_walk(self):
+        for child in self.childs:
+            child.target_walk()
+
+        self.target_prepare_walk()
+
+    def target_gen(self):
+        pass
+
+    def target_gen_walk(self):
+        for child in self.childs:
+            child.target_gen_walk()
+
+        self.target_gen()
+
     def configure_after_compile(self):
         pass
 

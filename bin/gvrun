@@ -112,6 +112,8 @@ try:
             target_name, target_properties = target_name.split(':')
             args.target_properties.append(target_properties)
 
+        gvrun.commands.parse_target_properties(args)
+
         target = gvrun.target.get_target(target_name)(
             parser=parser, options=None
         )

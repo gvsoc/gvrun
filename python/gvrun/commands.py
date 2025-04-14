@@ -113,6 +113,14 @@ def handle_command(target, command, args):
 
     global configured_after_compile
 
+    if command == 'target_prepare':
+        target.model.target_prepare_walk()
+        return
+
+    if command == 'target_gen':
+        target.model.target_gen_walk()
+        return
+
     if command == 'clean':
         shutil.rmtree(args.build_dir, ignore_errors=True)
         return
@@ -153,13 +161,15 @@ def handle_command(target, command, args):
         target.handle_command(command, args)
 
 
-def handle_commands(target, args):
-
+def parse_target_properties(args):
     global target_properties
 
     for prop in args.target_properties:
         key, value = prop.split('=', 1)
         target_properties[key] = value
+
+
+def handle_commands(target, args):
 
     commands = args.command
 
