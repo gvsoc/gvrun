@@ -139,6 +139,9 @@ try:
 
     args = parser.parse_args()
 
+    if not os.path.isabs(args.build_dir):
+        args.build_dir = os.path.join(os.getcwd(), args.build_dir)
+
     gvrun.commands.handle_commands(selected_target, args)
 
 except RuntimeError as e:
