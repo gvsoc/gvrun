@@ -121,7 +121,8 @@ try:
         parameters = []
         if target_name.find(':') != -1:
             target_name, parameters = target_name.split(':')
-            args.parameters.append(parameters)
+            for property_desc in parameters.split(','):
+                args.parameters.append(property_desc)
 
         gvrun.commands.parse_parameter_arg_values(args.parameters)
 

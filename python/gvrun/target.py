@@ -529,6 +529,9 @@ class SystemTreeNode:
                     value = int(value, 0)
                 else:
                     value = int(value)
+            elif desc.cast == bool:
+                if isinstance(value, str):
+                    value = value.strip().lower() in ("true", "1", "yes", "y")
 
         desc.value = value
 
