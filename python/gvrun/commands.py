@@ -97,6 +97,9 @@ def __print_available_commands():
 
 def handle_command(target, command, args):
 
+    if target.handle_command(command, args):
+        return
+
     if command == 'commands':
         __print_available_commands()
         return
