@@ -606,6 +606,15 @@ class SystemTreeNode:
 
         self._compile(builder, builddir)
 
+    def target_gen(self, builddir:str):
+        pass
+
+    def _target_gen_walk(self, builddir:str):
+        for child in self._get_childs():
+            child._target_gen_walk(builddir)
+
+        self.target_gen(builddir)
+
 
 class Target(SystemTreeNode):
     """

@@ -44,6 +44,7 @@ commands = [
     ['compile'     , 'Build executables for the target'],
     ['build'       , 'Execute the commands image, flash and compile'],
     ['all'         , 'Execute the commands build and run'],
+    ['target_gen'  , 'Generate files required for compiling target'],
 ]
 
 def get_parameter_arg_value(name):
@@ -134,6 +135,9 @@ def handle_command(target, command, args):
 
     if command in ['components', 'flash']:
         target.handle_command(command, args)
+
+    if command == 'target_gen':
+        target._target_gen_walk(args.build_dir)
 
 def parse_parameter_arg_values(parameters):
     global parameter_arg_values
