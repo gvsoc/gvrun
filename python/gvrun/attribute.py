@@ -21,8 +21,19 @@
 import rich.tree
 import rich.table
 from typing_extensions import Any, Type
-import gvrun.commands
-import gvrun.target
+
+__attribute_arg_values = {}
+
+def set_attributes(attributes):
+    global __attribute_arg_values
+
+    for prop in attributes:
+        key, value = prop.split('=', 1)
+        __attribute_arg_values[key] = value
+
+
+def get_attribute_arg_value(name):
+    return __attribute_arg_values.get(name)
 
 class Attr:
     """
@@ -35,14 +46,14 @@ class Attr:
 
     Attributes
     ----------
-    parent (gvrun.target.SystemTreeNode | Attr): Parent owning this attributes. Can be a system tree
+    parent (SystemTreeNode | Attr): Parent owning this attributes. Can be a system tree
         node for the top attribute or an attribute for the others
     name (str | None): Name of the attribute. Can be None for the top attribute.
     allowed_values (list[Any] | None=None): List of allowed values or None if any value is allowed
     description (str): Description of the attribute
     cast (Type[Any] | None=None): If it is not None, cast the value to the specified type
     """
-    def __init__(self, parent: "gvrun.target.SystemTreeNode | Attr", name: str | None,
+    def __init__(self, parent: "SystemTreeNode | Attr", name: str | None,
             allowed_values: list[Any] | None=None, description: str='',
             cast: Type[Any] | None=None):
         self._name = name
@@ -103,7 +114,7 @@ class Value(Attr):
 
     Attributes
     ----------
-    parent (gvrun.target.SystemTreeNode | Attr): Parent owning this attributes. Can be a system tree
+    parent (SystemTreeNode | Attr): Parent owning this attributes. Can be a system tree
         node for the top attribute or an attribute for the others
     name (str): Name of the attribute.
     value (Any): Value of the attribute.
@@ -111,12 +122,12 @@ class Value(Attr):
     description (str): Description of the attribute
     cast (Type[Any] | None=None): If it is not None, cast the value to the specified type
     """
-    def __init__(self, parent: "gvrun.target.SystemTreeNode | Attr", name: str, value: Any,
+    def __init__(self, parent: "SystemTreeNode | Attr", name: str, value: Any,
             allowed_values: list[Any] | None=None, description: str='',
             cast: Type[Any] | None=None):
         super().__init__(parent, name, allowed_values, description, cast)
         self.value = value
-        arg_value = gvrun.commands.get_attribute_arg_value(self._path)
+        arg_value = get_attribute_arg_value(self._path)
         if arg_value is not None:
             self.value = arg_value
 
@@ -143,14 +154,14 @@ class Area(Attr):
 
     Attributes
     ----------
-    parent (gvrun.target.SystemTreeNode | Attr): Parent owning this attributes. Can be a system tree
+    parent (SystemTreeNode | Attr): Parent owning this attributes. Can be a system tree
         node for the top attribute or an attribute for the others
     name (str): Name of the attribute.
     base (int): Base address of the area.
     size (int): Size of the area.
     description (str): Description of the attribute
     """
-    def __init__(self, parent: "gvrun.target.SystemTreeNode | Attr", name: str, base: int,
+    def __init__(self, parent: "SystemTreeNode | Attr", name: str, base: int,
             size: int, description=''):
         super().__init__(parent, name, description=description)
         self.base = Value(self, f'base', base, cast=int)
@@ -166,7 +177,7 @@ class Tree(Attr):
 
     Attributes
     ----------
-    parent (gvrun.target.SystemTreeNode | Attr): Parent owning this attributes. Can be a system tree
+    parent (SystemTreeNode | Attr): Parent owning this attributes. Can be a system tree
         node for the top attribute or an attribute for the others
     name (str | None): Name of the attribute. Can be None for the top tree attribute.
     """

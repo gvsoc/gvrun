@@ -22,16 +22,11 @@ import sys
 import os.path
 import logging
 import importlib.util
-import rich.tree
-import threading
-import psutil
-import queue
 import shutil
 import subprocess
-import gvrun.target
-
-parameter_arg_values = {}
-attribute_arg_values = {}
+from gvrun.attribute import set_attributes
+from gvrun.parameter import set_parameters, BuildParameter
+from gvrun.builder import Builder
 
 commands = [
     ['commands'    , 'Show the list of available commands'],
@@ -47,15 +42,9 @@ commands = [
     ['target_gen'  , 'Generate files required for compiling target'],
 ]
 
-def get_parameter_arg_value(name):
-    return parameter_arg_values.get(name)
-
-def get_attribute_arg_value(name):
-    return attribute_arg_values.get(name)
-
 def load_config(target, args):
-    gvrun.target.BuildParameter(target, 'platform', args.platform, 'Platform providing the target')
-    gvrun.target.BuildParameter(target, 'builddir', args.build_dir, 'Build directory')
+    BuildParameter(target, 'platform', args.platform, 'Platform providing the target')
+    BuildParameter(target, 'builddir', args.build_dir, 'Build directory')
 
     if os.path.exists('config.py'):
         module = import_config('config.py')
@@ -140,18 +129,10 @@ def handle_command(target, command, args):
         target._target_gen_walk(args.build_dir)
 
 def parse_parameter_arg_values(parameters):
-    global parameter_arg_values
-
-    for prop in parameters:
-        key, value = prop.split('=', 1)
-        parameter_arg_values[key] = value
+    set_parameters(parameters)
 
 def parse_attribute_arg_values(attributes):
-    global attribute_arg_values
-
-    for prop in attributes:
-        key, value = prop.split('=', 1)
-        attribute_arg_values[key] = value
+    set_attributes(attributes)
 
 def handle_commands(target, args):
 
@@ -203,80 +184,6 @@ class Command():
         self.retval = proc.returncode
         self.command_done()
         self.builder.command_done(self)
-
-
-class Builder():
-
-    class BuilderWorker(threading.Thread):
-
-        def __init__(self, builder):
-            super().__init__()
-
-            self.builder = builder
-
-        def run(self):
-            while True:
-                test = self.builder.pop_command()
-                if test is None:
-                    return
-                test.run()
-
-    def __init__(self, nb_threads, verbose):
-        if nb_threads == -1:
-            self.nb_threads = psutil.cpu_count(logical=True) or nb_threads
-        else:
-            self.nb_threads = nb_threads
-
-        self.nb_commands_failed = 0
-        self.nb_pending_commands = 0
-        self.lock = threading.Lock()
-        self.condition = threading.Condition(self.lock)
-        self.verbose = verbose
-        self.threads = []
-        self.queue = queue.Queue()
-
-        for thread_id in range(0, self.nb_threads):
-            thread = Builder.BuilderWorker(self)
-            self.threads.append(thread)
-            thread.start()
-
-    def stop(self):
-        for thread in self.threads:
-            self.queue.put(None)
-        for thread in self.threads:
-            thread.join()
-
-
-    def push_command(self, command):
-        self.lock.acquire()
-        self.nb_pending_commands += 1
-        self.queue.put(command)
-        self.lock.release()
-
-    def pop_command(self):
-        return self.queue.get()
-
-    def command_done(self, command):
-        self.lock.acquire()
-        if command.retval != 0:
-            self.nb_commands_failed += 1
-        self.nb_pending_commands -= 1
-
-        self.condition.notify_all()
-        self.lock.release()
-
-    def wait_completion(self):
-        self.lock.acquire()
-        while self.nb_pending_commands > 0:
-            self.condition.wait()
-
-            if self.nb_commands_failed > 0:
-                while not self.queue.empty():
-                    self.queue.get()
-                self.nb_pending_commands = 0
-
-        self.lock.release()
-        return self.nb_commands_failed
 
 
 def get_abspath(args, relpath: str) -> str:
