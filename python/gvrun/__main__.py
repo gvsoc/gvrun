@@ -105,7 +105,7 @@ if args.target.find('./') == 0:
 try:
 
     logging.basicConfig(level=getattr(logging, args.verbose.upper(), None),
-        format='\033[94m[GAPY]\033[0m %(asctime)s - %(levelname)s - %(message)s')
+        format='\033[94m[GVRUN]\033[0m %(message)s')
 
     # Targets will be imported as python modules so the specified target directories must be
     # appended to the python path
