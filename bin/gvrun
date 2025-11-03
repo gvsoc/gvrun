@@ -14,4 +14,4 @@ export PYTHONPATH=$INSTALL_DIR/python:$PYTHONPATH
 export USE_GVRUN=1
 export USE_GVRUN2=1
 
-python -m gvrun --platform=gvsoc --target-dir=$INSTALL_DIR/generators --model-dir=$INSTALL_DIR/models "$@"
+python3 -m gvrun --platform=gvsoc --target-dir=$INSTALL_DIR/generators --model-dir=$INSTALL_DIR/models "$@"
