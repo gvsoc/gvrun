@@ -44,7 +44,7 @@ commands = [
 
 def load_config(target, args):
     BuildParameter(target, 'platform', args.platform, 'Platform providing the target')
-    BuildParameter(target, 'builddir', args.build_dir, 'Build directory')
+    BuildParameter(target, 'builddir', os.path.join(args.work_dir, 'build'), 'Build directory')
 
     if os.path.exists('config.py'):
         module = import_config('config.py')
@@ -68,7 +68,7 @@ def dump_tree(target, args):
 def compile(target, args):
     builder = Builder(args.jobs, args.verbose)
     try:
-        target.model._compile_all(builder, args.build_dir)
+        target.model._compile_all(builder, os.path.join(args.work_dir, 'build'))
     except:
         builder.stop()
         raise
@@ -95,7 +95,7 @@ def handle_command(target, command, args):
         return
 
     if command == 'clean':
-        shutil.rmtree(args.build_dir, ignore_errors=True)
+        shutil.rmtree(os.path.join(args.work_dir, 'build'), ignore_errors=True)
         return
 
     if command == 'tree':
@@ -112,12 +112,12 @@ def handle_command(target, command, args):
         return
 
     if command in ['image', 'all', 'build']:
-        target.model.generate_all(args.build_dir)
+        target.model.generate_all(os.path.join(args.work_dir, 'build'))
         if command == 'image':
             return
 
     if command in ['run', 'all']:
-        target.model.generate_all(args.build_dir)
+        target.model.generate_all(os.path.join(args.work_dir, 'build'))
         target.run(args)
         if command == 'run':
             return
@@ -126,7 +126,7 @@ def handle_command(target, command, args):
         target.handle_command(command, args)
 
     if command == 'target_gen':
-        target._target_gen_walk(args.build_dir)
+        target._target_gen_walk(os.path.join(args.work_dir, 'build'))
 
 def parse_parameter_arg_values(parameters):
     set_parameters(parameters)
@@ -205,10 +205,10 @@ def get_abspath(args, relpath: str) -> str:
         if os.path.isabs(relpath):
             return relpath
 
-        if args.build_dir is None:
+        if args.work_dir is None:
             return os.path.abspath(relpath)
 
-        return os.path.join(args.build_dir, relpath)
+        return os.path.join(args.work_dir, relpath)
 
 def add_subdirectory(name, target):
     module = import_config(os.path.join(name, 'config.py'))

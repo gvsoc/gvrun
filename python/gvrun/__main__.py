@@ -83,8 +83,8 @@ parser.add_argument('--py-stack', dest='py_stack', action="store_true",
 parser.add_argument("--model-dir", dest="install_dirs", action="append", default=default_model_dirs,
     type=str, help="specify an installation path where to find models (only for GVSOC)")
 
-parser.add_argument('--build-dir',  dest='build_dir', default=f'{os.getcwd()}/build',
-    help='Specifies build directory.')
+parser.add_argument('--work-dir',  dest='work_dir', default=os.getcwd(),
+    help='Specify working directory (from where simulation is launched).')
 
 parser.add_argument("--jobs", "-j", dest="jobs", default=-1, type=int,
     help="Specify the number of worker threads")
@@ -140,8 +140,8 @@ try:
 
     args = parser.parse_args()
 
-    if not os.path.isabs(args.build_dir):
-        args.build_dir = os.path.join(os.getcwd(), args.build_dir)
+    if not os.path.isabs(args.work_dir):
+        args.work_dir = os.path.join(os.getcwd(), args.work_dir)
 
     gvrun.commands.handle_commands(selected_target, args)
 
