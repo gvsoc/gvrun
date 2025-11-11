@@ -42,6 +42,9 @@ commands = [
     ['target_gen'  , 'Generate files required for compiling target'],
 ]
 
+# True if we should generate components
+comp_generate = True
+
 def load_config(target, args):
     BuildParameter(target, 'platform', args.platform, 'Platform providing the target')
     BuildParameter(target, 'builddir', os.path.join(args.work_dir, 'build'), 'Build directory')
@@ -86,6 +89,7 @@ def __print_available_commands():
         print(f'  {command[0]:16s} {command[1]}')
 
 def handle_command(target, command, args):
+    global comp_generate
 
     if target.handle_command(command, args):
         return
@@ -112,12 +116,16 @@ def handle_command(target, command, args):
         return
 
     if command in ['image', 'all', 'build']:
-        target.model.generate_all(os.path.join(args.work_dir, 'build'))
+        if comp_generate:
+            comp_generate = False
+            target.model.generate_all(os.path.join(args.work_dir, 'build'))
         if command == 'image':
             return
 
     if command in ['run', 'all']:
-        target.model.generate_all(os.path.join(args.work_dir, 'build'))
+        if comp_generate:
+            comp_generate = False
+            target.model.generate_all(os.path.join(args.work_dir, 'build'))
         target.run(args)
         if command == 'run':
             return
