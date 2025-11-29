@@ -22,6 +22,7 @@ import abc
 import rich.table
 import rich.tree
 import traceback
+from typing import override, final
 from typing_extensions import Any, Callable, Dict
 from gvrun.attribute import Tree
 from gvrun.builder import Builder
@@ -40,6 +41,23 @@ class Executable(object, metaclass=abc.ABCMeta):
             str: Path to the binary
         """
         ...
+
+@final
+class ExecutableContainer(Executable):
+    """ Simple container for executable
+    It can be used to register a binary which has been compiled externally, so that components
+    like the ISS can get accessed to it.
+
+    Attributes
+    ----------
+    binary (str): Path to the binary
+    """
+    def __init__(self, binary: str):
+        self.binary = binary
+
+    @override
+    def get_binary(self) -> str:
+        return self.binary
 
 
 class SystemTreeNode:
@@ -274,6 +292,18 @@ class SystemTreeNode:
             executables += self.__parent.get_executables()
 
         return executables
+
+    def add_executable(self, executable: Executable):
+        """Add executable
+
+        Attach an executable to this node. Any node in the child hierarchy of this node which
+        query for executables will get this one.
+
+        Parameters
+        ----------
+        executable (Executable): Executable to be registered
+        """
+        self._add_executable(executable)
 
     def _add_executable(self, executable: Executable):
         """Add an executable to this node. This will notify any registered binary handler"""
