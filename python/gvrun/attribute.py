@@ -18,6 +18,7 @@
 # Authors: Germain Haugou (germain.haugou@gmail.com)
 #
 
+from dataclasses import fields
 import rich.tree
 import rich.table
 from typing_extensions import Any, Type
@@ -181,7 +182,7 @@ class Tree(Attr):
         node for the top attribute or an attribute for the others
     name (str | None): Name of the attribute. Can be None for the top tree attribute.
     """
-    def __init__(self, parent, name=None):
+    def __init__(self, parent: "SystemTreeNode | Attr | None", name: str | None=None):
         super().__init__(parent, name)
 
     def _dump_attributes(self, tree: rich.tree.Tree):

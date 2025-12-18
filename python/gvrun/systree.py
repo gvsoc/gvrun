@@ -19,6 +19,7 @@
 #
 
 import abc
+from dataclasses import fields, is_dataclass
 import rich.table
 import rich.tree
 import traceback
@@ -28,6 +29,10 @@ from gvrun.attribute import Tree
 from gvrun.builder import Builder
 from gvrun.parameter import Parameter, get_parameter_arg_value
 
+def hex_grouped(value: int, group: int = 4) -> str:
+    s = f"{value:x}"
+    parts = [s[max(i - group, 0):i] for i in range(len(s), 0, -group)]
+    return "0x" + "_".join(reversed(parts))
 
 class Executable(object, metaclass=abc.ABCMeta):
     """ Interface class for executable classes
@@ -76,7 +81,7 @@ class SystemTreeNode:
         for the top node.
     """
 
-    def __init__(self, name: str | None, parent: "SystemTreeNode | None"=None):
+    def __init__(self, name: str | None, parent: "SystemTreeNode | None"=None, tree=None):
         self.__name = name
         self.__childs = []
         self.__childs_from_name = {}
@@ -91,6 +96,8 @@ class SystemTreeNode:
         self.__attributes = None
         self.__node_type = 'Component'
         self.__target_name = None
+        if tree is not None:
+            self.set_attributes(tree)
 
         paths = []
 
@@ -107,7 +114,7 @@ class SystemTreeNode:
 
         self.__path = '/'.join(paths)
 
-    def set_target_name(self, name: str):
+    def set_target_name(self, name: str) -> None:
         """Set target name.
 
         In case this part of the system tree needs to refered by other tools, such as the build
@@ -187,7 +194,7 @@ class SystemTreeNode:
         """
         self.__set_parameter(name, value)
 
-    def set_attributes(self, attributes: Tree):
+    def set_attributes(self, attributes: Tree) -> Tree:
         """Set the attributes of this node.
 
         The attributes are the high-level characterics of the hardware system.
@@ -338,6 +345,36 @@ class SystemTreeNode:
         """Tell if this node has parameters"""
         return self.__has_tree_content
 
+    def __dump_dataclass(self, tree, attr):
+        table = rich.table.Table()
+        table.add_column('Name')
+        table.add_column('Value')
+        table.add_column('Full name')
+        table.add_column('Allowed values')
+        table.add_column('Description')
+        tree.add(table)
+        for f in fields(attr):
+            value = getattr(attr, f.name)
+            desc = f.metadata.get("description", "")
+            format = f.metadata.get("format", "")
+
+            allowed_values = f.metadata.get("allowed_values", "")
+            if allowed_values is None:
+                if isinstance(value, int):
+                    allowed_values = 'any integer'
+                else:
+                    allowed_values = 'any string'
+            else:
+                allowed_values = ', '.join(allowed_values)
+
+            if format == 'hex':
+                value_str = hex_grouped(value)
+            else:
+                value_str = str(value)
+
+            table.add_row(f.name, value_str, self.get_path(f.name), allowed_values,
+                desc)
+
     def _dump_node_parameters(self, tree: rich.tree.Tree, inc_arch: bool, inc_build: bool,
             inc_target: bool, inc_attr: bool, inc_prop: bool):
         """Dump the parameters, attributes and properties for this node"""
@@ -345,7 +382,11 @@ class SystemTreeNode:
             attr = self.get_attributes()
             if attr is not None:
                 sub_tree = tree.add(f'[yellow italic]Attributes[/]')
-                attr._dump_attributes(sub_tree)
+
+                if is_dataclass(attr):
+                    self.__dump_dataclass(sub_tree, attr)
+                else:
+                    attr._dump_attributes(sub_tree)
         if inc_arch and len(self.__arch_parameters) > 0:
             self.__dump_tree_parameter_table(tree, 'Arch', self.__arch_parameters)
         if inc_build and len(self.__build_parameters) > 0:
@@ -524,3 +565,17 @@ class SystemTreeNode:
             child._target_gen_walk(builddir)
 
         self.target_gen(builddir)
+
+class Attr:
+    def __repr__(self) -> str:
+        parts = []
+        for f in fields(self):
+            value = getattr(self, f.name)
+            fmt = f.metadata.get("format")
+
+            if fmt == "hex" and isinstance(value, int):
+                value = hex_grouped(value)
+
+            parts.append(f"{f.name}={value}")
+
+        return f"{self.__class__.__name__}({', '.join(parts)})"
