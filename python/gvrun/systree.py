@@ -27,7 +27,7 @@ from typing import override, final
 from typing_extensions import Any, Callable, Dict
 from gvrun.attribute import Tree
 from gvrun.builder import Builder
-from gvrun.parameter import Parameter, get_parameter_arg_value
+from gvrun.parameter import Parameter, get_parameter_arg_value, set_parameters
 
 def hex_grouped(value: int, group: int = 4) -> str:
     s = f"{value:x}"
@@ -457,12 +457,12 @@ class SystemTreeNode:
         else:
             desc = self.__parameters.get(name)
         if check and desc is None:
-            raise RuntimeError(f'Trying to get invalid parameter (name: {name}')
+            raise RuntimeError(f'Trying to get invalid parameter (name: {name})')
 
         return desc
 
     def __set_parameter(self, name: str, value: Any):
-        """Get a parameter value. This will check if the value fits the allowed values and may
+        """Set a parameter value. This will check if the value fits the allowed values and may
         cast the value if specified when declaring the parameter"""
         desc = self.__get_parameter(name)
         if desc is None:

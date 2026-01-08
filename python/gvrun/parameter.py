@@ -18,20 +18,32 @@
 # Authors: Germain Haugou (germain.haugou@gmail.com)
 #
 
-from typing_extensions import Any
+from typing_extensions import Any, List, Tuple
 
 
-__parameter_arg_values = {}
+__cmdline_parameter_values = {}
+__node_parameter_values = {}
 
 def set_parameters(parameters):
-    global __parameter_arg_values
+    global __cmdline_parameter_values
 
     for prop in parameters:
         key, value = prop.split('=', 1)
-        __parameter_arg_values[key] = value
+        __cmdline_parameter_values[key] = value
+
+def set_parameters_from_node(parameters: List[Tuple[str,Any]]):
+    global __node_parameter_values
+
+    for prop in parameters:
+        __node_parameter_values[prop[0]] = prop[1]
 
 def get_parameter_arg_value(name):
-    return __parameter_arg_values.get(name)
+    # First return the value from command_line arguments as it overwrite the ones from the nodes
+    value = __cmdline_parameter_values.get(name)
+    if value is not None:
+        return value
+    # If not set, return from nodes
+    return __node_parameter_values.get(name)
 
 
 class Parameter():
@@ -77,6 +89,10 @@ class Parameter():
         self.is_target = is_target
         self.is_arch = is_arch
         self.is_build = is_build
+        if self.cast is None and value is not None:
+            # Cast to the type of desc.value when desc.cast is None
+            self.cast = type(value)
+
 
     def get_value(self):
         return self.value
