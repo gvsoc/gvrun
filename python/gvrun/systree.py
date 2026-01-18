@@ -18,6 +18,7 @@
 # Authors: Germain Haugou (germain.haugou@gmail.com)
 #
 
+import logging
 import abc
 from dataclasses import fields, is_dataclass
 import rich.table
@@ -311,6 +312,17 @@ class SystemTreeNode:
         executable (Executable): Executable to be registered
         """
         self._add_executable(executable)
+
+    def regmap_gen(self, template, outdir, name, block=None, headers=['regfields', 'gvsoc']):
+        import regmap.regmap
+        import regmap.regmap_md
+        import regmap.regmap_c_header
+        outfile = f'{outdir}/{name}'
+        logging.debug(f'Generating regmap (template: {template}, file: {outfile}*)')
+        regmap_instance = regmap.regmap.Regmap(name)
+        regmap.regmap_md.import_md(regmap_instance, template, block=block)
+        regmap.regmap_c_header.dump_to_header(regmap=regmap_instance, name=name,
+            header_path=outfile, headers=headers)
 
     def _add_executable(self, executable: Executable):
         """Add an executable to this node. This will notify any registered binary handler"""
