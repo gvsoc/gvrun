@@ -27,6 +27,7 @@ import subprocess
 from gvrun.attribute import set_attributes
 from gvrun.parameter import set_parameters, BuildParameter
 from gvrun.builder import Builder
+from gvrun.target import Target
 
 commands = [
     ['commands'    , 'Show the list of available commands'],
@@ -45,7 +46,7 @@ commands = [
 # True if we should generate components
 comp_generate = True
 
-def load_config(target, args):
+def load_config(target: Target, args):
     BuildParameter(target, 'platform', args.platform, 'Platform providing the target')
     BuildParameter(target, 'builddir', os.path.join(args.work_dir, 'build'), 'Build directory')
 
@@ -88,7 +89,7 @@ def __print_available_commands():
     for command in commands:
         print(f'  {command[0]:16s} {command[1]}')
 
-def handle_command(target, command, args):
+def handle_command(target: Target, command, args):
     global comp_generate
 
     if target.handle_command(command, args):
@@ -142,7 +143,7 @@ def parse_parameter_arg_values(parameters):
 def parse_attribute_arg_values(attributes):
     set_attributes(attributes)
 
-def handle_commands(target, args):
+def handle_commands(target: Target, args):
 
     commands = args.command
 
