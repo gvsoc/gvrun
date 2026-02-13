@@ -19,40 +19,54 @@
 #
 
 import threading
+from typing import override
 import psutil
 import queue
+from abc import ABC, abstractmethod
+
+class CommandInterface(ABC):
+
+    @abstractmethod
+    def get_retval(self) -> int:
+        pass
+
+    @abstractmethod
+    def run(self) -> None:
+        pass
 
 class Builder():
 
     class BuilderWorker(threading.Thread):
 
-        def __init__(self, builder):
+        def __init__(self, builder: Builder):
             super().__init__()
 
-            self.builder = builder
+            self.builder: Builder = builder
 
+        @override
         def run(self):
             while True:
-                test = self.builder.pop_command()
+                test: CommandInterface|None = self.builder.pop_command()
                 if test is None:
                     return
                 test.run()
 
-    def __init__(self, nb_threads, verbose):
+    def __init__(self, nb_threads: int, verbose: str):
+        self.nb_threads: int
         if nb_threads == -1:
             self.nb_threads = psutil.cpu_count(logical=True) or nb_threads
         else:
             self.nb_threads = nb_threads
 
-        self.nb_commands_failed = 0
-        self.nb_pending_commands = 0
-        self.lock = threading.Lock()
-        self.condition = threading.Condition(self.lock)
-        self.verbose = verbose
-        self.threads = []
-        self.queue = queue.Queue()
+        self.nb_commands_failed: int = 0
+        self.nb_pending_commands: int = 0
+        self.lock: threading.Lock = threading.Lock()
+        self.condition: threading.Condition = threading.Condition(self.lock)
+        self.verbose: str = verbose
+        self.threads: list[threading.Thread] = []
+        self.queue: queue.Queue[CommandInterface|None] = queue.Queue()
 
-        for thread_id in range(0, self.nb_threads):
+        for _ in range(0, self.nb_threads):
             thread = Builder.BuilderWorker(self)
             self.threads.append(thread)
             thread.start()
@@ -64,18 +78,18 @@ class Builder():
             thread.join()
 
 
-    def push_command(self, command):
-        self.lock.acquire()
+    def push_command(self, command: CommandInterface):
+        _ = self.lock.acquire()
         self.nb_pending_commands += 1
         self.queue.put(command)
         self.lock.release()
 
-    def pop_command(self):
+    def pop_command(self) -> CommandInterface|None:
         return self.queue.get()
 
-    def command_done(self, command):
-        self.lock.acquire()
-        if command.retval != 0:
+    def command_done(self, command: CommandInterface):
+        _ = self.lock.acquire()
+        if command.get_retval() != 0:
             self.nb_commands_failed += 1
         self.nb_pending_commands -= 1
 
@@ -83,13 +97,13 @@ class Builder():
         self.lock.release()
 
     def wait_completion(self):
-        self.lock.acquire()
+        _ = self.lock.acquire()
         while self.nb_pending_commands > 0:
-            self.condition.wait()
+            _ = self.condition.wait()
 
             if self.nb_commands_failed > 0:
                 while not self.queue.empty():
-                    self.queue.get()
+                    _ = self.queue.get()
                 self.nb_pending_commands = 0
 
         self.lock.release()

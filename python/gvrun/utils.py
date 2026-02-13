@@ -68,10 +68,10 @@ class CStructField():
     """
 
     def __init__(self, name: str, size: int, value: Any, offset: int):
-        self.name = name
-        self.size = size
-        self.value = value
-        self.__offset = offset
+        self.name: str = name
+        self.size: int = size
+        self.value: Any = value
+        self.__offset: int = offset
 
     def get_offset(self) -> Any:
         """Get field offset in flash.
@@ -201,13 +201,13 @@ class CStruct():
     """
 
     def __init__(self, name: str, parent: 'CStructParent'):
-        self.fields = OrderedDict()
-        self.struct = None
-        self.format = '<'
+        self.fields: dict[str,Any] = OrderedDict()
+        self.struct: struct.Struct|None = None
+        self.format: str = '<'
         self.__size = 0
         self.__name = name
-        self.parent = parent
-        parent.add_struct(self)
+        self.parent: CStructParent = parent
+        _ = parent.add_struct(self)
 
     def get_name(self) -> str:
         """Get sub-section name.
@@ -399,7 +399,7 @@ class CStruct():
         if self.struct is None:
             self.struct = struct.Struct(self.format)
 
-        values = []
+        values: list[Any] = []
         for field in self.fields.values():
             values.append(field.value)
 
@@ -419,9 +419,9 @@ class CStructParent():
     """
 
     def __init__(self, name: str, parent: Any):
-        self.name = name
-        self.structs = []
-        self.parent = parent
+        self.name: str = name
+        self.structs: list[CStruct] = []
+        self.parent: CStructParent = parent
         if parent is not None:
             parent.add_struct(self)
 
@@ -474,7 +474,7 @@ class CStructParent():
         return self.parent.alloc_offset(size)
 
 
-    def add_struct(self, cstruct: CStruct | None) -> CStruct | None:
+    def add_struct(self, cstruct: CStruct) -> CStruct:
         """Add a structure to the sub-section.
 
         Returns

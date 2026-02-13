@@ -44,27 +44,26 @@ default_platform = os.environ.get('GVRUN_PLATFORM')
 parser = argparse.ArgumentParser(description='Execute commands on the target',
     formatter_class=argparse.ArgumentDefaultsHelpFormatter, prog="gvrun", add_help=False)
 
-parser.add_argument('command', metavar='CMD', type=str, nargs='*',
-                    help='a command to be executed (execute the command "commands" to '
-                    'get the list of commands)')
+_ = parser.add_argument('command', metavar='CMD', type=str, nargs='*',
+    help='a command to be executed (execute the command "commands" to get the list of commands)')
 
-parser.add_argument("--target", '-t', dest="target", default=default_target,
+_ = parser.add_argument("--target", '-t', dest="target", default=default_target,
 	required=default_target is None, help="specify the target")
 
-parser.add_argument("--target-dir", dest="target_dirs", default=default_target_dirs, action="append",
+_ = parser.add_argument("--target-dir", dest="target_dirs", default=default_target_dirs, action="append",
     help="append the specified directory to the list of directories where to look for targets")
 
-parser.add_argument("--parameter", dest="parameters", default=[],
+_ = parser.add_argument("--parameter", dest="parameters", default=[],
     action="append", help="specify the value of a parameter")
 
-parser.add_argument("--attribute", dest="attributes", default=[],
+_ = parser.add_argument("--attribute", dest="attributes", default=[],
     action="append", help="specify the value of an attribute")
 
-parser.add_argument('--verbose', dest='verbose', type=str, default='critical', choices=[
+_ = parser.add_argument('--verbose', dest='verbose', type=str, default='critical', choices=[
     'debug', 'info', 'warning', 'error', 'critical'],
     help='Specifies verbose level.')
 
-parser.add_argument('--tree-format', dest='tree_format', default='arch:target:build',
+_ = parser.add_argument('--tree-format', dest='tree_format', default='arch:target:build',
     help=(
         "Specify tree format as a list of items separated by ':'.\n"
         "Available items:\n"
@@ -77,19 +76,19 @@ parser.add_argument('--tree-format', dest='tree_format', default='arch:target:bu
         "\n"
     ))
 
-parser.add_argument('--py-stack', dest='py_stack', action="store_true",
+_ = parser.add_argument('--py-stack', dest='py_stack', action="store_true",
     help='Show python exception stack.')
 
-parser.add_argument("--model-dir", dest="install_dirs", action="append", default=default_model_dirs,
+_ = parser.add_argument("--model-dir", dest="install_dirs", action="append", default=default_model_dirs,
     type=str, help="specify an installation path where to find models (only for GVSOC)")
 
-parser.add_argument('--work-dir',  dest='work_dir', default=os.getcwd(),
+_ = parser.add_argument('--work-dir',  dest='work_dir', default=os.getcwd(),
     help='Specify working directory (from where simulation is launched).')
 
-parser.add_argument("--jobs", "-j", dest="jobs", default=-1, type=int,
+_ = parser.add_argument("--jobs", "-j", dest="jobs", default=-1, type=int,
     help="Specify the number of worker threads")
 
-parser.add_argument("--platform", dest="platform", default=default_platform,
+_ = parser.add_argument("--platform", dest="platform", default=default_platform,
     required=default_platform is None,
     choices=['fpga', 'board', 'rtl', 'gvsoc'],
     type=str, help="specify the platform used for the target")
@@ -130,7 +129,7 @@ try:
 
         target_class = gvrun.target.get_target(target_name)
         selected_target = target_class(
-            parser=parser, name=None
+            parser=parser, name=''
         )
 
     parser = argparse.ArgumentParser(
@@ -143,7 +142,8 @@ try:
     if not os.path.isabs(args.work_dir):
         args.work_dir = os.path.join(os.getcwd(), args.work_dir)
 
-    gvrun.commands.handle_commands(selected_target, args)
+    if selected_target is not None:
+        gvrun.commands.handle_commands(selected_target, args)
 
 except RuntimeError as e:
     if args.py_stack:
