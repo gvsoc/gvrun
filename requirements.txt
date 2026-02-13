@@ -7,3 +7,4 @@ pycryptodome
 ppk2_api
 rich
 psutils
+psutil

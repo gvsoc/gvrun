@@ -18,16 +18,22 @@
 # Authors: Germain Haugou (germain.haugou@gmail.com)
 #
 
+from abc import ABC
 import sys
 import os.path
 import logging
 import importlib.util
 import shutil
 import subprocess
+import argparse
+from typing import override
+import gvrun.systree
+import gvrun.config
 from gvrun.attribute import set_attributes
 from gvrun.parameter import set_parameters, BuildParameter
-from gvrun.builder import Builder
+from gvrun.builder import Builder, CommandInterface
 from gvrun.target import Target
+from gvrun.systree import SystemTreeNode
 
 commands = [
     ['commands'    , 'Show the list of available commands'],
@@ -46,33 +52,35 @@ commands = [
 # True if we should generate components
 comp_generate = True
 
-def load_config(target: Target, args):
-    BuildParameter(target, 'platform', args.platform, 'Platform providing the target')
-    BuildParameter(target, 'builddir', os.path.join(args.work_dir, 'build'), 'Build directory')
+def load_config(target: SystemTreeNode|None, args: argparse.Namespace):
+    if target is not None:
+        _ = BuildParameter(target, 'platform', args.platform, 'Platform providing the target')
+        _ = BuildParameter(target, 'builddir', os.path.join(args.work_dir, 'build'), 'Build directory')
 
-    if os.path.exists('config.py'):
-        module = import_config('config.py')
-        module.declare(target)
+        if os.path.exists('config.py'):
+            module = import_config('config.py')
+            module.declare(target)
 
-    target.configure_all()
+        target.configure_all()
 
 
-def dump_tree(target, args):
+def dump_tree(target: Target, args: argparse.Namespace):
 
     options = set(args.tree_format.split(':'))
 
-    target._process_and_dump_tree(
-        {'all', 'attr'} & options,
-        {'all', 'build'} & options,
-        {'all', 'target'} & options,
-        {'all', 'attr'} & options,
-        {'all', 'prop'} & options
+    target.process_and_dump_tree(
+        len({'all', 'attr'} & options) > 0,
+        len({'all', 'build'} & options) > 0,
+        len({'all', 'target'} & options) > 0,
+        len({'all', 'attr'} & options) > 0,
+        len({'all', 'prop'} & options) > 0
     )
 
-def compile(target, args):
+
+def compile(target: Target, args: argparse.Namespace):
     builder = Builder(args.jobs, args.verbose)
     try:
-        target.model._compile_all(builder, os.path.join(args.work_dir, 'build'))
+        target.compile_all(builder, os.path.join(args.work_dir, 'build'))
     except:
         builder.stop()
         raise
@@ -89,7 +97,7 @@ def __print_available_commands():
     for command in commands:
         print(f'  {command[0]:16s} {command[1]}')
 
-def handle_command(target: Target, command, args):
+def handle_command(target: Target, command: str, args: argparse.Namespace):
     global comp_generate
 
     if target.handle_command(command, args):
@@ -112,48 +120,46 @@ def handle_command(target: Target, command, args):
         if command == 'compile':
             return
 
-    if command == 'flash_layout':
-        target.dump_flash_layout_walk(args.layout_level)
-        return
-
     if command in ['image', 'all', 'build']:
         if comp_generate:
             comp_generate = False
-            target.model.generate_all(os.path.join(args.work_dir, 'build'))
+            target.generate_all(os.path.join(args.work_dir, 'build'))
         if command == 'image':
             return
 
     if command in ['run', 'all']:
         if comp_generate:
             comp_generate = False
-            target.model.generate_all(os.path.join(args.work_dir, 'build'))
-        target.run(args)
+            target.generate_all(os.path.join(args.work_dir, 'build'))
+        _ = target.run(args)
         if command == 'run':
             return
 
     if command in ['components', 'flash']:
-        target.handle_command(command, args)
+        _ = target.handle_command(command, args)
 
     if command == 'target_gen':
-        target._target_gen_walk(os.path.join(args.work_dir, 'build'))
+        target.target_gen_walk(os.path.join(args.work_dir, 'build'))
 
-def parse_parameter_arg_values(parameters):
+def parse_parameter_arg_values(parameters: list[str]):
     set_parameters(parameters)
 
-def parse_attribute_arg_values(attributes):
+def parse_attribute_arg_values(attributes: list[str]):
     set_attributes(attributes)
+    gvrun.systree.set_attributes(attributes)
+    gvrun.config.set_attributes(attributes)
 
-def handle_commands(target: Target, args):
+def handle_commands(target: Target, args: argparse.Namespace):
 
     commands = args.command
 
-    load_config(target.model, args)
+    load_config(target.get_systree(), args)
 
     for command in commands:
         handle_command(target, command, args)
 
 
-class Command():
+class Command(CommandInterface,ABC):
     """
     Parent class for all commands, which provides functionalities for enqueueing commands to be
     executed.
@@ -165,14 +171,14 @@ class Command():
     """
 
     def __init__(self, builder: "Builder"):
-        self.trigger_count = 0
-        self.trigger_commands = []
-        self.builder = builder
+        self.trigger_count: int = 0
+        self.trigger_commands: list[Command] = []
+        self.builder: Builder = builder
 
     def has_trigger(self):
         return len(self.trigger_commands) != 0
 
-    def add_trigger(self, command):
+    def add_trigger(self, command: Command):
         command.trigger_count += 1
         self.trigger_commands.append(command)
 
@@ -183,19 +189,23 @@ class Command():
                 if command.trigger_count == 0:
                     self.builder.push_command(command)
 
-    def execute(self, cmd, path=None):
+    def execute(self, cmd: str, path: str|None=None):
         if self.builder.verbose == 'debug':
             print (cmd, flush=True)
 
         proc = subprocess.run(cmd.split(), cwd=path, text=True, capture_output=True)
-        sys.stdout.write(proc.stdout)
-        sys.stderr.write(proc.stderr)
-        self.retval = proc.returncode
+        _ = sys.stdout.write(proc.stdout)
+        _ = sys.stderr.write(proc.stderr)
+        self.retval: int = proc.returncode
         self.command_done()
         self.builder.command_done(self)
 
+    @override
+    def get_retval(self) -> int:
+        return self.retval
 
-def get_abspath(args, relpath: str) -> str:
+
+def get_abspath(args: argparse.Namespace, relpath: str) -> str:
         """Return the absolute path depending on the working directory.
 
         If no working directory was specified, the relpath is appended to the current directory.
@@ -219,12 +229,12 @@ def get_abspath(args, relpath: str) -> str:
 
         return os.path.join(args.work_dir, relpath)
 
-def add_subdirectory(name, target):
+def add_subdirectory(name: str, target: Target):
     module = import_config(os.path.join(name, 'config.py'))
     module.declare(target)
 
 
-def import_config(name):
+def import_config(name: str):
 
     logging.debug(f'Importing config (name: {name})')
 
@@ -239,7 +249,7 @@ def import_config(name):
         sys.modules["module.name"] = module
         spec.loader.exec_module(module)
 
-    except FileNotFoundError as exc:
+    except FileNotFoundError:
         raise RuntimeError('Unable to open test configuration file: ' + name)
 
     return module

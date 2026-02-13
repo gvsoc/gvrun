@@ -18,14 +18,13 @@
 # Authors: Germain Haugou (germain.haugou@gmail.com)
 #
 
-from dataclasses import fields
 import rich.tree
 import rich.table
-from typing_extensions import Any, Type
+from typing_extensions import Any
 
-__attribute_arg_values = {}
+__attribute_arg_values: dict[str,Any] = {}
 
-def set_attributes(attributes):
+def set_attributes(attributes: list[str]):
     global __attribute_arg_values
 
     for prop in attributes:
@@ -33,7 +32,7 @@ def set_attributes(attributes):
         __attribute_arg_values[key] = value
 
 
-def get_attribute_arg_value(name):
+def get_attribute_arg_value(name: str) -> Any:
     return __attribute_arg_values.get(name)
 
 class Attr:
@@ -56,7 +55,7 @@ class Attr:
     """
     def __init__(self, parent: "SystemTreeNode | Attr", name: str | None,
             allowed_values: list[Any] | None=None, description: str='',
-            cast: Type[Any] | None=None):
+            cast: type | None=None):
         self._name = name
         self._parent = parent
         self._path = name
@@ -125,7 +124,7 @@ class Value(Attr):
     """
     def __init__(self, parent: "SystemTreeNode | Attr", name: str, value: Any,
             allowed_values: list[Any] | None=None, description: str='',
-            cast: Type[Any] | None=None):
+            cast: type | None=None):
         super().__init__(parent, name, allowed_values, description, cast)
         self.value = value
         arg_value = get_attribute_arg_value(self._path)

@@ -21,11 +21,7 @@
 import argparse
 import importlib
 import inspect
-from typing_extensions import Any, Callable, Dict
 from gvrun.systree import SystemTreeNode
-from gvrun.attribute import Tree
-from gvrun.parameter import BuildParameter, Parameter, get_parameter_arg_value
-from abc import ABC, abstractmethod
 
 
 def get_target(target: str) -> 'type[Target]':
@@ -51,8 +47,8 @@ def get_target(target: str) -> 'type[Target]':
         if exc.name == target:
             raise RuntimeError(f'Invalid target specified: {target}') from exc
 
-        raise RuntimeError(f"Dependency '{exc.name}' of the target module '{target}' is"
-            " missing (add --py-stack for more information).") from exc
+        raise RuntimeError((f"Dependency '{exc.name}' of the target module '{target}' is"
+            " missing (add --py-stack for more information).")) from exc
 
     if 'Target' in dir(module):
 
@@ -78,13 +74,42 @@ class Target(SystemTreeNode):
     parser (argparse.ArgumentParser): Argument parser
     name (str | None): Name of the target.
     """
-    def __init__(self, parser: argparse.ArgumentParser, name: str | None):
+    def __init__(self, parser: argparse.ArgumentParser, name: str):
         super().__init__(name)
         self.__parser = parser
+        self.__runner_flags: list[str] = []
         self._set_node_type('Target')
 
-    def _process_and_dump_tree(self, inc_arch: bool, inc_build: bool, inc_target: bool,
+    def process_and_dump_tree(self, inc_arch: bool, inc_build: bool, inc_target: bool,
         inc_attr: bool, inc_prop: bool):
-        """Dump the tree whole child hierarchy of the target"""
-        self._process_has_tree_content(inc_arch, inc_build, inc_target, inc_attr, inc_prop)
+        """Reserved for internal usage. Dump the tree whole child hierarchy of the target"""
+        _ = self._process_has_tree_content(inc_arch, inc_build, inc_target, inc_attr, inc_prop)
         super()._dump_tree(None, inc_arch, inc_build, inc_target, inc_attr, inc_prop)
+
+    def add_runner_flags(self, flags: list[str] | str):
+        if isinstance(flags, list):
+            self.__runner_flags += flags
+        else:
+            self.__runner_flags.append(flags)
+
+    def get_runner_flags(self) -> list[str]:
+        return self.__runner_flags
+
+    def handle_command(self, command: str, args: argparse.Namespace):
+        """Reserved for internal usage"""
+        _ = command
+        _ = args
+        return False
+
+    def generate_all(self, path: str):
+        """Reserved for internal usage"""
+        _ = path
+
+    def run(self, args: argparse.Namespace) -> int:
+        """Reserved for internal usage"""
+        _ = args
+        return 0
+
+    def get_systree(self) -> SystemTreeNode | None:
+        """Reserved for internal usage"""
+        return None

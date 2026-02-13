@@ -18,17 +18,32 @@
 # Authors: Germain Haugou (germain.haugou@gmail.com)
 #
 
+from dataclasses import fields, is_dataclass
+
 import logging
 import abc
-from dataclasses import fields, is_dataclass
 import rich.table
 import rich.tree
 import traceback
+from gvrun.config import Config
 from typing import override, final
-from typing_extensions import Any, Callable, Dict
-from gvrun.attribute import Tree
+from typing_extensions import Any, Callable
 from gvrun.builder import Builder
-from gvrun.parameter import Parameter, get_parameter_arg_value, set_parameters
+from gvrun.parameter import Parameter, get_parameter_arg_value, SystemTreeNodeParameter
+
+__attribute_arg_values: dict[str, str] = {}
+
+def set_attributes(attributes: list[str]):
+    global __attribute_arg_values
+
+    for prop in attributes:
+        key, value = prop.split('=', 1)
+        __attribute_arg_values[key] = value
+
+
+def get_attribute_arg_value(name: str) -> str | None:
+    return __attribute_arg_values.get(name)
+
 
 def hex_grouped(value: int, group: int = 4) -> str:
     s = f"{value:x}"
@@ -66,7 +81,7 @@ class ExecutableContainer(Executable):
         return self.binary
 
 
-class SystemTreeNode:
+class SystemTreeNode(SystemTreeNodeParameter):
     """
     Common type for the system tree nodes
 
@@ -82,36 +97,35 @@ class SystemTreeNode:
         for the top node.
     """
 
-    def __init__(self, name: str | None, parent: "SystemTreeNode | None"=None, tree=None):
+    def __init__(self, name: str, parent: "SystemTreeNode | None"=None, config: Config|None=None):
         self.__name = name
-        self.__childs = []
-        self.__childs_from_name = {}
-        self.__parameters = {}
-        self.__arch_parameters = {}
-        self.__build_parameters = {}
-        self.__target_parameters = {}
-        self.__executables = []
+        self.__childs: list[SystemTreeNode] = []
+        self.__childs_from_name: dict[str,SystemTreeNode] = {}
+        self.__parameters: dict[str,Parameter] = {}
+        self.__arch_parameters: dict[str,Parameter] = {}
+        self.__build_parameters: dict[str,Parameter] = {}
+        self.__target_parameters: dict[str,Parameter] = {}
+        self.__executables: list[Executable] = []
         self.__parent = parent
-        self.__binary_handlers = []
+        self.__binary_handlers: list[Callable[[str], None]] = []
         self.__has_tree_content = False
         self.__attributes = None
         self.__node_type = 'Component'
         self.__target_name = None
-        if tree is not None:
-            self.set_attributes(tree)
+        if config is not None:
+            self.set_attributes(config)
 
-        paths = []
+        paths: list[str] = []
 
         if parent is not None:
             parent_path = parent.get_path()
-            if parent_path is not None and parent_path != '':
+            if parent_path != '':
                 paths.append(parent_path)
 
             parent.__childs.append(self)
             parent.__childs_from_name[name] = self
 
-        if name is not None:
-            paths.append(name)
+        paths.append(name)
 
         self.__path = '/'.join(paths)
 
@@ -176,7 +190,7 @@ class SystemTreeNode:
             return desc.value
         return None
 
-    def set_parameter(self, name: str, value: Any):
+    def set_parameter(self, name: str, value: str | int | bool | float) -> None:
         """Set parameter value.
 
         Parameters are declared when building the system tree. They can be assigned default values
@@ -195,7 +209,7 @@ class SystemTreeNode:
         """
         self.__set_parameter(name, value)
 
-    def set_attributes(self, attributes: Tree) -> Tree:
+    def set_attributes(self, attributes: Config):
         """Set the attributes of this node.
 
         The attributes are the high-level characterics of the hardware system.
@@ -209,9 +223,8 @@ class SystemTreeNode:
         attributes (Tree): The tree of attributes
         """
         self.__attributes = attributes
-        return attributes
 
-    def get_attributes(self) -> Tree | None:
+    def get_attributes(self) -> Config | None:
         """Get the attributes of this node.
 
         The attributes are the high-level characterics of the hardware system.
@@ -263,6 +276,7 @@ class SystemTreeNode:
         """
         return self.__name
 
+    @override
     def get_path(self, child_path: str | None=None) -> str:
         """Get the node path
 
@@ -294,7 +308,7 @@ class SystemTreeNode:
         -------
         list[Component]: The list of executables
         """
-        executables = []
+        executables: list[Executable] = []
         executables += self.__executables
         if self.__parent is not None:
             executables += self.__parent.get_executables()
@@ -313,7 +327,18 @@ class SystemTreeNode:
         """
         self._add_executable(executable)
 
-    def regmap_gen(self, template, outdir, name, block=None, headers=['regfields', 'gvsoc']):
+    def configure_all(self) -> None:
+        """Call all configure methods of the tree
+
+        Do not call it, this is used by the framework to recursively call the configure method
+        of the nodes
+        """
+        pass
+
+    def regmap_gen(self, template: str, outdir: str, name: str, block: str|None=None,
+            headers: list[str]|None=None):
+        if headers is None:
+            headers = ['regfields', 'gvsoc']
         import regmap.regmap
         import regmap.regmap_md
         import regmap.regmap_c_header
@@ -347,6 +372,7 @@ class SystemTreeNode:
     def _dump_tree_properties(self, tree: rich.tree.Tree):
         """Dump the tree of properties. By default empty, implemented by GVSOC nodes to dump
         GVSOC model properties"""
+        _ = tree
         pass
 
     def _process_has_tree_property(self) -> bool:
@@ -357,35 +383,70 @@ class SystemTreeNode:
         """Tell if this node has parameters"""
         return self.__has_tree_content
 
-    def __dump_dataclass(self, tree, attr):
+    def __get_value(self, value: int | bool | str | float, fmt: str) -> str:
+        if fmt == 'hex' and isinstance(value, int):
+            value_str = hex_grouped(value)
+        else:
+            value_str = str(value)
+
+        return value_str
+
+    def __dump_dataclass(self, tree: rich.tree.Tree, attr: Config):
         table = rich.table.Table()
         table.add_column('Name')
         table.add_column('Value')
         table.add_column('Full name')
         table.add_column('Allowed values')
         table.add_column('Description')
-        tree.add(table)
+        _ = tree.add(table)
         for f in fields(attr):
-            value = getattr(attr, f.name)
-            desc = f.metadata.get("description", "")
-            format = f.metadata.get("format", "")
+            # Only display the fields which has been assigned
+            if f.repr and hasattr(attr, f.name):
+                value = getattr(attr, f.name)
+                desc = f.metadata.get("description", "")
+                format = f.metadata.get("format", "")
 
-            allowed_values = f.metadata.get("allowed_values", "")
-            if allowed_values is None:
-                if isinstance(value, int):
-                    allowed_values = 'any integer'
+                allowed_values = f.metadata.get("allowed_values", "")
+                if allowed_values is None:
+                    if isinstance(value, int):
+                        allowed_values = 'any integer'
+                    else:
+                        allowed_values = 'any string'
                 else:
-                    allowed_values = 'any string'
-            else:
-                allowed_values = ', '.join(allowed_values)
+                    allowed_values = ', '.join(allowed_values)
 
-            if format == 'hex':
-                value_str = hex_grouped(value)
-            else:
-                value_str = str(value)
+                value_str = self.__get_value(value, fmt=format)
 
-            table.add_row(f.name, value_str, self.get_path(f.name), allowed_values,
-                desc)
+                path = self.get_path(f.name)
+                # In case the value is itself a config with inlined fields, we display them withing
+                # the path to let the user know they can be set
+                if isinstance(value, Config):
+                    child_paths: list[str] = []
+                    for value_f in fields(value):
+                        if value_f.repr and hasattr(value, value_f.name):
+                            if value_f.metadata.get("inlined_dump") == True:
+                                child_paths.append(value_f.name)
+                    if len(child_paths) != 0:
+                        path += f'/({"|".join(child_paths)})'
+
+                table.add_row(f.name, value_str, path, allowed_values,
+                    desc)
+
+                if isinstance(value, Config):
+                    for value_f in fields(value):
+                        if value_f.repr and hasattr(value, value_f.name):
+                            if value_f.metadata.get("dump") == True:
+                                child_path = f'{path}/{value_f.name}'
+                                child_value = getattr(value, value_f.name)
+                                child_fmt = value_f.metadata.get("format", "")
+                                child_value_str = self.__get_value(child_value, fmt=child_fmt)
+                                indent = '    '
+                                table.add_row(
+                                    indent + value_f.name,
+                                    indent + child_value_str,
+                                    indent + child_path,
+                                    "",
+                                    indent + value_f.metadata.get("description", ""))
 
     def _dump_node_parameters(self, tree: rich.tree.Tree, inc_arch: bool, inc_build: bool,
             inc_target: bool, inc_attr: bool, inc_prop: bool):
@@ -425,8 +486,9 @@ class SystemTreeNode:
 
         return self.__has_tree_content
 
-    def _declare_parameter(self, descriptor: Parameter) -> Any:
-        """Declare a parameter and return its value"""
+    @override
+    def declare_parameter(self, descriptor: Parameter) -> Any:
+        """Declare a parameter and return its value. Reserved for infrastructure."""
 
         if self.__parameters.get(descriptor.name) is not None:
             traceback.print_stack()
@@ -482,9 +544,9 @@ class SystemTreeNode:
 
         if desc.allowed_values is not None:
             if value not in desc.allowed_values:
-                raise RuntimeError(f'Trying to set parameter to invalid value '
+                raise RuntimeError((f'Trying to set parameter to invalid value '
                     f'(name: {desc.full_name}, value: {value}, '
-                    f'allowed_values: {", ".join(desc.allowed_values)})')
+                    f'allowed_values: {", ".join(desc.allowed_values)})'))
 
         if desc.cast is not None:
             if desc.cast == int:
@@ -499,7 +561,7 @@ class SystemTreeNode:
         desc.value = value
 
     def __dump_tree_parameter_table(self, tree: rich.tree.Tree, name: str,
-            parameters: Dict[str, Parameter]):
+            parameters: dict[str, Parameter]):
         """Dump the parameters of one kind for this node into a table"""
         table = rich.table.Table(title=f'[yellow]{name} parameters[/]', title_justify="left")
         table.add_column('Name')
@@ -525,7 +587,7 @@ class SystemTreeNode:
 
             table.add_row(prop_name, value_str, prop_full_name, allowed_values, prop.description)
 
-        tree.add(table)
+        _ = tree.add(table)
 
     def __notify_binary_handlers(self, executable: Executable):
         """Notify a new executable to all callbacks registered in the child hierarchy of this node"""
@@ -560,34 +622,24 @@ class SystemTreeNode:
 
     def _compile(self, builder: Builder, builddir: str):
         """Compile step, should be overriden by build process nodes"""
+        _ = builder
+        _ = builddir
         pass
 
-    def _compile_all(self, builder: Builder, builddir: str):
-        """Call the compile step for every node of the child hierarchy"""
+    def compile_all(self, builder: Builder, builddir: str):
+        """Reserved for internal usage. Call the compile step for every node of the child hierarchy"""
         for child in self._get_childs():
-            child._compile_all(builder, builddir)
+            child.compile_all(builder, builddir)
 
         self._compile(builder, builddir)
 
     def target_gen(self, builddir:str):
+        _ = builddir
         pass
 
-    def _target_gen_walk(self, builddir:str):
+    def target_gen_walk(self, builddir:str):
+        """Reserved for internal usage."""
         for child in self._get_childs():
-            child._target_gen_walk(builddir)
+            child.target_gen_walk(builddir)
 
         self.target_gen(builddir)
-
-class Attr:
-    def __repr__(self) -> str:
-        parts = []
-        for f in fields(self):
-            value = getattr(self, f.name)
-            fmt = f.metadata.get("format")
-
-            if fmt == "hex" and isinstance(value, int):
-                value = hex_grouped(value)
-
-            parts.append(f"{f.name}={value}")
-
-        return f"{self.__class__.__name__}({', '.join(parts)})"

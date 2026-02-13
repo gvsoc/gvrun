@@ -18,26 +18,30 @@
 # Authors: Germain Haugou (germain.haugou@gmail.com)
 #
 
-from typing_extensions import Any, List, Tuple
+from typing_extensions import Any
+from typing import Protocol
 
+class SystemTreeNodeParameter(Protocol):
+    def get_path(self) -> str: ...
+    def declare_parameter(self, descriptor: "Parameter") -> None: ...
 
-__cmdline_parameter_values = {}
-__node_parameter_values = {}
+__cmdline_parameter_values: dict[str,Any] = {}
+__node_parameter_values: dict[str,Any] = {}
 
-def set_parameters(parameters):
+def set_parameters(parameters: list[str]):
     global __cmdline_parameter_values
 
     for prop in parameters:
         key, value = prop.split('=', 1)
         __cmdline_parameter_values[key] = value
 
-def set_parameters_from_node(parameters: List[Tuple[str,Any]]):
+def set_parameters_from_node(parameters: list[tuple[str,Any]]):
     global __node_parameter_values
 
     for prop in parameters:
         __node_parameter_values[prop[0]] = prop[1]
 
-def get_parameter_arg_value(name):
+def get_parameter_arg_value(name: str) -> Any:
     # First return the value from command_line arguments as it overwrite the ones from the nodes
     value = __cmdline_parameter_values.get(name)
     if value is not None:
@@ -71,24 +75,25 @@ class Parameter():
     """
 
     def __init__(self, name: str, value: Any, description: str, path: str | None=None,
-            allowed_values: list | None=None, cast: type | None=None, dump_format: str | None=None,
-            is_target=False, is_arch=False, is_build=False):
+            allowed_values: list[Any] | None=None, cast: type | None=None, dump_format: str | None=None,
+            is_target: bool=False, is_arch: bool=False, is_build: bool=False):
 
-        self.name = name
-        self.path = path
+        self.full_name: str
+        self.name: str = name
+        self.path: str|None = path
         if path is not None and path != '':
             self.full_name = path + '/' + name
         else:
             self.full_name = name
 
-        self.description = description
-        self.value = value
-        self.allowed_values = allowed_values
-        self.cast = cast
-        self.format = dump_format
-        self.is_target = is_target
-        self.is_arch = is_arch
-        self.is_build = is_build
+        self.description: str = description
+        self.value: Any = value
+        self.allowed_values: list[Any]|None = allowed_values
+        self.cast: type | None = cast
+        self.format: str | None = dump_format
+        self.is_target: bool = is_target
+        self.is_arch: bool = is_arch
+        self.is_build: bool = is_build
         if self.cast is None and value is not None:
             # Cast to the type of desc.value when desc.cast is None
             self.cast = type(value)
@@ -100,32 +105,32 @@ class Parameter():
 
 class TargetParameter(Parameter):
 
-    def __init__(self, parent, name: str, value: Any, description: str,
-            allowed_values: list | None=None, cast: type | None=None, dump_format: str | None=None):
+    def __init__(self, parent: SystemTreeNodeParameter, name: str, value: Any, description: str,
+            allowed_values: list[Any] | None=None, cast: type | None=None, dump_format: str | None=None):
 
         super().__init__(name=name, value=value, description=description, path=parent.get_path(),
             allowed_values=allowed_values, cast=cast, dump_format=dump_format, is_target=True)
 
-        parent._declare_parameter(self)
+        parent.declare_parameter(self)
 
 
 class BuildParameter(Parameter):
 
-    def __init__(self, parent, name: str, value: Any, description: str,
-            allowed_values: list | None=None, cast: type | None=None, dump_format: str | None=None):
+    def __init__(self, parent: SystemTreeNodeParameter, name: str, value: Any, description: str,
+            allowed_values: list[Any] | None=None, cast: type | None=None, dump_format: str | None=None):
 
         super().__init__(name=name, value=value, description=description, path=parent.get_path(),
             allowed_values=allowed_values, cast=cast, dump_format=dump_format, is_build=True)
 
-        parent._declare_parameter(self)
+        parent.declare_parameter(self)
 
 
 class ArchParameter(Parameter):
 
-    def __init__(self, parent, name: str, value: Any, description: str,
-            allowed_values: list | None=None, cast: type | None=None, dump_format: str | None=None):
+    def __init__(self, parent: SystemTreeNodeParameter, name: str, value: Any, description: str,
+            allowed_values: list[Any] | None=None, cast: type | None=None, dump_format: str | None=None):
 
         super().__init__(name=name, value=value, description=description, path=parent.get_path(),
             allowed_values=allowed_values, cast=cast, dump_format=dump_format, is_arch=True)
 
-        parent._declare_parameter(self)
+        parent.declare_parameter(self)
