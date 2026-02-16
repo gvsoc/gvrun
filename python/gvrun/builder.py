@@ -18,6 +18,8 @@
 # Authors: Germain Haugou (germain.haugou@gmail.com)
 #
 
+# For python 3.12
+from __future__ import annotations
 import threading
 from typing import override
 import psutil
