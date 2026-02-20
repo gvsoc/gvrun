@@ -28,7 +28,10 @@ import importlib.util
 import shutil
 import subprocess
 import argparse
-from typing import override
+try:
+    from typing import override  # Python 3.12+
+except ImportError:
+    from typing_extensions import override  # Python 3.10–3.11
 import gvrun.systree
 import gvrun.config
 from gvrun.attribute import set_attributes

@@ -21,7 +21,10 @@
 # For python 3.12
 from __future__ import annotations
 import threading
-from typing import override
+try:
+    from typing import override  # Python 3.12+
+except ImportError:
+    from typing_extensions import override  # Python 3.10–3.11
 import psutil
 import queue
 from abc import ABC, abstractmethod

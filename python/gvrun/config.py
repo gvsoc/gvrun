@@ -41,7 +41,10 @@ import enum
 from dataclasses import fields, is_dataclass, dataclass, field
 from typing import Any, cast, get_args, get_origin
 from dataclasses import MISSING
-from typing import override
+try:
+    from typing import override  # Python 3.12+
+except ImportError:
+    from typing_extensions import override  # Python 3.10–3.11
 
 __attribute_arg_values: dict[str, str] = {}
 
