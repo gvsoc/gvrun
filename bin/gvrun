@@ -1,12 +1,32 @@
 #!/usr/bin/env bash
 
+set -e
+
 if [  -n "${ZSH_VERSION:-}" ]; then
-        DIR="$(readlink -f -- "${(%):-%x}")"
-        DIRNAME="$(dirname $DIR)"
-        INSTALL_DIR=$(dirname $DIRNAME)
+        SCRIPT_PATH="$(readlink -f -- "${(%):-%x}")"
 else
-        INSTALL_DIR="$(dirname $(dirname "$(readlink -f "${BASH_SOURCE[0]}")"))"
+        SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
 fi
+
+SCRIPT_DIR="$(dirname "$SCRIPT_PATH")"
+SDK_ROOT=""
+
+if [ -d "$SCRIPT_DIR/../../../.venv" ] && [ -d "$SCRIPT_DIR/../../../install" ]; then
+        SDK_ROOT="$(readlink -f "$SCRIPT_DIR/../../..")"
+elif [ -d "$SCRIPT_DIR/../../.venv" ] && [ -d "$SCRIPT_DIR/../../install" ]; then
+        SDK_ROOT="$(readlink -f "$SCRIPT_DIR/../..")"
+elif [ -d "$SCRIPT_DIR/../lib" ] && [ -d "$SCRIPT_DIR/../python" ]; then
+        SDK_ROOT="$(readlink -f "$SCRIPT_DIR/..")"
+else
+        SDK_ROOT="$(readlink -f "$SCRIPT_DIR/../..")"
+fi
+
+INSTALL_DIR="$SDK_ROOT/install"
+if [ ! -d "$INSTALL_DIR" ]; then
+        INSTALL_DIR="$SDK_ROOT"
+fi
+
+VENV_GVRUN="$SDK_ROOT/.venv/bin/gvrun"
 
 export LD_LIBRARY_PATH=$INSTALL_DIR/lib:$LD_LIBRARY_PATH
 export PATH=$INSTALL_DIR/bin:$PATH
@@ -18,4 +38,8 @@ if [ -z "$GVRUN_MODEL_PATH" ]; then
     GVRUN_MODEL_PATH=$INSTALL_DIR/models
 fi
 
-python3 -m gvrun --platform=gvsoc --target-dir=$INSTALL_DIR/targets --target-dir=$INSTALL_DIR/generators --model-dir=$GVRUN_MODEL_PATH "$@"
+if [ -x "$VENV_GVRUN" ]; then
+        exec "$VENV_GVRUN" --platform=gvsoc --target-dir="$INSTALL_DIR/targets" --target-dir="$INSTALL_DIR/generators" --model-dir="$GVRUN_MODEL_PATH" "$@"
+fi
+
+exec python3 -m gvrun --platform=gvsoc --target-dir="$INSTALL_DIR/targets" --target-dir="$INSTALL_DIR/generators" --model-dir="$GVRUN_MODEL_PATH" "$@"

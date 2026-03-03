@@ -1,10 +1,10 @@
 pyelftools>=0.24
-argparse>=1.4
 prettytable
 pexpect
 lz4
 pycryptodome
 ppk2_api
 rich
-psutils
 psutil
+typing_extensions
+six

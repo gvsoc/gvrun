@@ -39,9 +39,11 @@ from gvrun.parameter import set_parameters, BuildParameter
 from gvrun.builder import Builder, CommandInterface
 from gvrun.target import Target
 from gvrun.systree import SystemTreeNode
+from config_tree import Config
 
 commands = [
     ['commands'    , 'Show the list of available commands'],
+    ['config'      , 'Show the target configuration'],
     ['targets'     , 'Show the list of available targets'],
     ['image'       , 'Generate the target images needed to run execution'],
     ['flash'       , 'Upload the flash contents to the target'],
@@ -155,6 +157,10 @@ def handle_command(target: Target, command: str, args: argparse.Namespace):
         __print_available_commands()
         return
 
+    if command == 'config':
+        target.config.dump()
+        return
+
     if command == 'clean':
         shutil.rmtree(os.path.join(args.work_dir, 'build'), ignore_errors=True)
         return
@@ -199,6 +205,7 @@ def parse_attribute_arg_values(attributes: list[str]):
     set_attributes(attributes)
     gvrun.systree.set_attributes(attributes)
     gvrun.config.set_attributes(attributes)
+    Config.override_fields(attributes)
 
 def handle_commands(target: Target, args: argparse.Namespace):
 

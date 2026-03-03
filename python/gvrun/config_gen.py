@@ -40,7 +40,7 @@ from dataclasses import fields, is_dataclass, MISSING
 
 
 # Fields inherited from Config base class — skip these
-_SKIP_FIELDS = {'parent', 'name', 'path'}
+_SKIP_FIELDS = {'parent', 'name', 'label', 'path', 'children', 'links', 'defines'}
 
 # Python types we can map to C++
 _TYPE_MAP = {

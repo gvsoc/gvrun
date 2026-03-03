@@ -24,134 +24,194 @@ import os
 import argparse
 import logging
 import sys
+import inspect
+from pathlib import Path
 import gvrun.target
 import gvrun.commands
 
-default_target = os.environ.get('GVRUN_TARGET')
-default_target_dirs = os.environ.get('GVRUN_TARGET_DIRS')
-if default_target_dirs is None:
-    default_target_dirs = []
-else:
-    default_target_dirs = default_target_dirs.split(':')
-default_model_dirs = os.environ.get('GVRUN_MODEL_DIRS')
-if default_model_dirs is None:
-    default_model_dirs = []
-else:
-    default_model_dirs = default_model_dirs.split(':')
-default_platform = os.environ.get('GVRUN_PLATFORM')
 
-# Generic gapy options, all for specifying the target and its options
-parser = argparse.ArgumentParser(description='Execute commands on the target',
-    formatter_class=argparse.ArgumentDefaultsHelpFormatter, prog="gvrun", add_help=False)
+def _find_sdk_install_dir() -> Path | None:
+    candidates = []
 
-_ = parser.add_argument('command', metavar='CMD', type=str, nargs='*',
-    help='a command to be executed (execute the command "commands" to get the list of commands)')
+    module_path = Path(__file__).resolve()
+    candidates.extend(module_path.parents)
 
-_ = parser.add_argument("--target", '-t', dest="target", default=default_target,
-	required=default_target is None, help="specify the target")
+    cwd_path = Path.cwd().resolve()
+    candidates.extend(cwd_path.parents)
+    candidates.append(cwd_path)
 
-_ = parser.add_argument("--target-dir", dest="target_dirs", default=default_target_dirs, action="append",
-    help="append the specified directory to the list of directories where to look for targets")
+    seen: set[Path] = set()
+    ordered_candidates: list[Path] = []
+    for candidate in candidates:
+        if candidate not in seen:
+            seen.add(candidate)
+            ordered_candidates.append(candidate)
 
-_ = parser.add_argument("--parameter", dest="parameters", default=[],
-    action="append", help="specify the value of a parameter")
+    for candidate in ordered_candidates:
+        install_dir = candidate / 'install'
+        if (install_dir / 'targets').exists() and (install_dir / 'generators').exists():
+            return install_dir
 
-_ = parser.add_argument("--attribute", dest="attributes", default=[],
-    action="append", help="specify the value of an attribute")
+    return None
 
-_ = parser.add_argument('--verbose', dest='verbose', type=str, default='critical', choices=[
-    'debug', 'info', 'warning', 'error', 'critical'],
-    help='Specifies verbose level.')
+def main(argv: list[str] | None = None) -> int:
+    os.environ.setdefault('USE_GVRUN', '1')
+    os.environ.setdefault('USE_GVRUN2', '1')
 
-_ = parser.add_argument('--tree-format', dest='tree_format', default='arch:target:build',
-    help=(
-        "Specify tree format as a list of items separated by ':'.\n"
-        "Available items:\n"
-        "  attr   - Show attributes (architecture high-level characteristics).\n"
-        "  arch   - Show architecture parameters (low-level model parameters).\n"
-        "  target - Show target parameters (parameters for configuring execution on targets).\n"
-        "  build  - Show build parameters (parameters for building target executables).\n"
-        "  prop   - Show target properties (low-level model characteristics).\n"
-        "  all    - Show everything.\n"
-        "\n"
-    ))
+    default_target = os.environ.get('GVRUN_TARGET')
+    default_target_dirs = os.environ.get('GVRUN_TARGET_DIRS')
+    if default_target_dirs is None:
+        default_target_dirs = []
+    else:
+        default_target_dirs = default_target_dirs.split(':')
+    default_model_dirs = os.environ.get('GVRUN_MODEL_DIRS')
+    if default_model_dirs is None:
+        default_model_dirs = []
+    else:
+        default_model_dirs = default_model_dirs.split(':')
+    default_platform = os.environ.get('GVRUN_PLATFORM', 'gvsoc')
 
-_ = parser.add_argument('--py-stack', dest='py_stack', action="store_true",
-    help='Show python exception stack.')
+    parser = argparse.ArgumentParser(description='Execute commands on the target',
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter, prog="gvrun")
 
-_ = parser.add_argument("--model-dir", dest="install_dirs", action="append", default=default_model_dirs,
-    type=str, help="specify an installation path where to find models (only for GVSOC)")
+    _ = parser.add_argument('command', metavar='CMD', type=str, nargs='*',
+        help='a command to be executed (execute the command "commands" to get the list of commands)')
 
-_ = parser.add_argument('--work-dir',  dest='work_dir', default=os.getcwd(),
-    help='Specify working directory (from where simulation is launched).')
+    _ = parser.add_argument("--target", '-t', dest="target", default=default_target,
+        required=default_target is None, help="specify the target")
 
-_ = parser.add_argument("--jobs", "-j", dest="jobs", default=-1, type=int,
-    help="Specify the number of worker threads")
+    _ = parser.add_argument("--target-dir", dest="target_dirs", default=default_target_dirs, action="append",
+        help="append the specified directory to the list of directories where to look for targets")
 
-_ = parser.add_argument("--platform", dest="platform", default=default_platform,
-    required=default_platform is None,
-    choices=['fpga', 'board', 'rtl', 'gvsoc'],
-    type=str, help="specify the platform used for the target")
+    _ = parser.add_argument("--parameter", dest="parameters", default=[],
+        action="append", help="specify the value of a parameter")
 
-_ = parser.add_argument("--no-group", dest="no_group", action="store_true",
-    default=False,
-    help="For diagram command: show all instances instead of grouping similar components")
+    _ = parser.add_argument("--target-property", dest="target_properties", default=[],
+        action="append", help="specify the value of a target property")
 
-# Do a first argument parse so that we can get the target and add more arguments, depending on
-# the target
-[args, otherArgs] = parser.parse_known_args()
+    _ = parser.add_argument('--target-opt', dest='target_opt', action="append", default=[],
+        help='specify target options')
 
-if args.target.find('./') == 0:
-    args.target = args.target[2:]
-    args.target_dirs.append(os.getcwd())
+    _ = parser.add_argument('--config-opt', dest='config_opt', action="append", default=[],
+        help='specify target options (backward compatibility)')
 
-try:
+    _ = parser.add_argument("--attribute", dest="attributes", default=[],
+        action="append", help="specify the value of an attribute")
 
-    logging.basicConfig(level=getattr(logging, args.verbose.upper(), None),
-        format='\033[94m[GVRUN]\033[0m %(message)s')
+    _ = parser.add_argument('--verbose', dest='verbose', type=str, default='critical', choices=[
+        'debug', 'info', 'warning', 'error', 'critical'],
+        help='Specifies verbose level.')
 
-    # Targets will be imported as python modules so the specified target directories must be
-    # appended to the python path
-    sys.path = args.target_dirs + sys.path
+    _ = parser.add_argument("--no-group", dest="no_group", action="store_true",
+        default=False,
+        help="For diagram command: show all instances instead of grouping similar components")
 
-    # Instantiate the specified target or if no target is specified, instantiate an empty one
-    # since we need a target to handle commands
-    selected_target = None
-    if args.target is not None:
-        # Check if the target name has parameters inlined and if so, inject them
-        # into the list of parameters
-        target_name = args.target
-        parameters = []
-        if target_name.find(':') != -1:
-            target_name, parameters = target_name.split(':')
-            for property_desc in parameters.split(','):
-                args.parameters.append(property_desc)
+    _ = parser.add_argument('--tree-format', dest='tree_format', default='arch:target:build',
+        help=(
+            "Specify tree format as a list of items separated by ':'.\n"
+            "Available items:\n"
+            "  attr   - Show attributes (architecture high-level characteristics).\n"
+            "  arch   - Show architecture parameters (low-level model parameters).\n"
+            "  target - Show target parameters (parameters for configuring execution on targets).\n"
+            "  build  - Show build parameters (parameters for building target executables).\n"
+            "  prop   - Show target properties (low-level model characteristics).\n"
+            "  all    - Show everything.\n"
+            "\n"
+        ))
 
-        gvrun.commands.parse_parameter_arg_values(args.parameters)
+    _ = parser.add_argument('--py-stack', dest='py_stack', action="store_true",
+        help='Show python exception stack.')
 
-        gvrun.commands.parse_attribute_arg_values(args.attributes)
+    _ = parser.add_argument("--model-dir", dest="install_dirs", action="append", default=default_model_dirs,
+        type=str, help="specify an installation path where to find models (only for GVSOC)")
 
-        target_class = gvrun.target.get_target(target_name)
-        selected_target = target_class(
-            parser=parser, name=''
+    _ = parser.add_argument('--work-dir',  dest='work_dir', default=os.getcwd(),
+        help='Specify working directory (from where simulation is launched).')
+
+    _ = parser.add_argument("--jobs", "-j", dest="jobs", default=-1, type=int,
+        help="Specify the number of worker threads")
+
+    _ = parser.add_argument("--platform", dest="platform", default=default_platform,
+        required=default_platform is None,
+        choices=['fpga', 'board', 'rtl', 'gvsoc'],
+        type=str, help="specify the platform used for the target")
+
+    [args, _] = parser.parse_known_args(argv)
+
+    if len(args.target_dirs) == 0:
+        install_dir = _find_sdk_install_dir()
+        if install_dir is not None:
+            args.target_dirs.append(str(install_dir / 'targets'))
+            args.target_dirs.append(str(install_dir / 'generators'))
+
+    if len(args.install_dirs) == 0:
+        install_dir = _find_sdk_install_dir()
+        if install_dir is not None and (install_dir / 'models').exists():
+            args.install_dirs.append(str(install_dir / 'models'))
+
+    if len(args.install_dirs) == 0:
+        legacy_model_path = os.environ.get('GVRUN_MODEL_PATH')
+        if legacy_model_path is not None and legacy_model_path != '':
+            args.install_dirs.append(legacy_model_path)
+
+    if args.target is not None and args.target.find('./') == 0:
+        args.target = args.target[2:]
+        args.target_dirs.append(os.getcwd())
+
+    try:
+
+        logging.basicConfig(level=getattr(logging, args.verbose.upper(), None),
+            format='\033[94m[GVRUN]\033[0m %(message)s')
+
+        sys.path = args.target_dirs + sys.path
+
+        selected_target = None
+        if args.target is not None:
+            target_name = args.target
+            parameters = []
+            if target_name.find(':') != -1:
+                target_name, parameters = target_name.split(':')
+                for property_desc in parameters.split(','):
+                    args.parameters.append(property_desc)
+
+            target_class = gvrun.target.get_target(target_name)
+            target_kwargs = {
+                "parser": parser,
+                "name": "",
+            }
+            init_signature = inspect.signature(target_class.__init__)
+            if "options" in init_signature.parameters:
+                target_kwargs["options"] = args.config_opt + args.target_opt
+
+            gvrun.commands.parse_parameter_arg_values(args.parameters)
+
+            gvrun.commands.parse_attribute_arg_values(args.attributes)
+
+            selected_target = target_class(**target_kwargs)
+
+        parser = argparse.ArgumentParser(
+            parents=[parser],
+            formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+            add_help=False,
         )
 
-    parser = argparse.ArgumentParser(
-        parents=[parser],
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-    )
+        args = parser.parse_args(argv)
 
-    args = parser.parse_args()
+        if not os.path.isabs(args.work_dir):
+            args.work_dir = os.path.join(os.getcwd(), args.work_dir)
 
-    if not os.path.isabs(args.work_dir):
-        args.work_dir = os.path.join(os.getcwd(), args.work_dir)
+        if selected_target is not None:
+            gvrun.commands.handle_commands(selected_target, args)
 
-    if selected_target is not None:
-        gvrun.commands.handle_commands(selected_target, args)
+    except RuntimeError as e:
+        if args.py_stack:
+            raise
 
-except RuntimeError as e:
-    if args.py_stack:
-        raise
+        print('Input error: ' + str(e), file = sys.stderr)
+        return 1
 
-    print('Input error: ' + str(e), file = sys.stderr)
-    sys.exit(1)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

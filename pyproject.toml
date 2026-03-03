@@ -1,0 +1,28 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "gvrun"
+version = "0.1.0"
+description = "GVSOC simulation runner"
+requires-python = ">=3.8"
+dependencies = [
+    "pyelftools>=0.24",
+    "prettytable",
+    "pexpect",
+    "lz4",
+    "pycryptodome",
+    "ppk2_api",
+    "rich",
+    "psutil",
+    "typing_extensions",
+    "six",
+]
+
+[project.scripts]
+gvrun = "gvrun.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+# gvrun package lives under python/ rather than the project root
+packages = ["python/gvrun"]

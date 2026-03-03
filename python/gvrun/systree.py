@@ -30,7 +30,7 @@ try:
     from typing import override  # Python 3.12+
 except ImportError:
     from typing_extensions import override  # Python 3.10–3.11
-from gvrun.config import Config
+from config_tree import Config
 from typing_extensions import Any, Callable
 from gvrun.builder import Builder
 from gvrun.parameter import Parameter, get_parameter_arg_value, SystemTreeNodeParameter
