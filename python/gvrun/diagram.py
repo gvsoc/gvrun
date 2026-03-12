@@ -186,7 +186,7 @@ class DiagramBuilder:
         if is_top:
             for group_name, members in groups.items():
                 if len(members) >= 3:
-                    self._emit_group_node(comp, group_name, members, depth, indent)
+                    self._emit_group(comp, group_name, members, depth, indent)
                 else:
                     for name, child in members:
                         self._emit_component(child, depth)
@@ -203,8 +203,8 @@ class DiagramBuilder:
 
         for group_name, members in groups.items():
             if len(members) >= 3:
-                self._emit_group_node(comp, group_name, members, depth + 1,
-                                      indent + '    ')
+                self._emit_group(comp, group_name, members, depth + 1,
+                                 indent + '    ')
             else:
                 for name, child in members:
                     self._emit_component(child, depth + 1)
@@ -229,6 +229,67 @@ class DiagramBuilder:
         label = '\\n'.join(label_parts)
         self._emit(f'{indent}{node_id} [label="{label}", fillcolor="{style["node"]}"];')
         self.leaf_nodes.add(node_id)
+
+    def _emit_group(self, parent_comp, group_name, members, depth, indent):
+        """Emit a group of similar components.
+
+        - If the members are leaf components (no children), collapse all into a single summary node.
+        - If the members are complex (have sub-components), show the first one expanded in detail
+          and emit a summary node for the remaining N-1 instances.
+        """
+        _, first_child = members[0]
+        first_has_children = len(getattr(first_child, 'components', {})) > 0
+
+        if first_has_children:
+            # Complex group: expand the first one, collapse the rest
+            first_name, first_child = members[0]
+            self._emit_component(first_child, depth)
+
+            if len(members) > 1:
+                # Summary node for the rest
+                remaining = members[1:]
+                self._emit_group_summary(parent_comp, group_name, first_name,
+                                         remaining, depth, indent)
+        else:
+            # Simple leaf group: collapse all into one summary node
+            self._emit_group_node(parent_comp, group_name, members, depth, indent)
+
+    def _emit_group_summary(self, parent_comp, group_name, representative_name,
+                            remaining_members, depth, indent):
+        """Emit a summary node for remaining instances of a complex group."""
+        style = _DEPTH_STYLES[depth % len(_DEPTH_STYLES)]
+        count = len(remaining_members)
+
+        _, first = remaining_members[0]
+        info = _get_component_info(first)
+
+        label = (f'{group_name} x{count} more\\n'
+                 f'({info["class"]})\\n'
+                 f'(same as {representative_name})')
+
+        parent_path = _get_comp_path(parent_comp)
+        group_path = f'{parent_path}/{group_name}_group'
+        group_id = _sanitize_id(group_path)
+
+        self._emit(f'{indent}{group_id} [label="{label}", fillcolor="{style["node"]}", '
+                   f'shape=box3d, style="filled,rounded,dashed"];')
+
+        self.node_map[group_path] = group_id
+        self.leaf_nodes.add(group_id)
+
+        # Map all remaining member paths to this summary node
+        for name, child in remaining_members:
+            child_path = _get_comp_path(child)
+            self.node_map[child_path] = group_id
+            # Also map all descendants of collapsed members
+            self._map_descendants(child, group_id)
+
+    def _map_descendants(self, comp, target_id):
+        """Recursively map all descendants of a component to a target node ID."""
+        for child_name, child in getattr(comp, 'components', {}).items():
+            child_path = _get_comp_path(child)
+            self.node_map[child_path] = target_id
+            self._map_descendants(child, target_id)
 
     def _emit_group_node(self, parent_comp, group_name, members, depth, indent):
         style = _DEPTH_STYLES[depth % len(_DEPTH_STYLES)]
