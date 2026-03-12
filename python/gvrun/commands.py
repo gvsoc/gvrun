@@ -52,6 +52,7 @@ commands = [
     ['build'       , 'Execute the commands image, flash and compile'],
     ['all'         , 'Execute the commands build and run'],
     ['target_gen'  , 'Generate files required for compiling target'],
+    ['diagram'     , 'Generate a Graphviz architecture diagram of the target'],
 ]
 
 # True if we should generate components
@@ -95,6 +96,47 @@ def compile(target: Target, args: argparse.Namespace):
 
     if retval != 0:
         raise RuntimeError(f'Compilation returned an error (exitcode: {retval})')
+
+def generate_diagram_cmd(target: Target, args: argparse.Namespace):
+    from gvrun.diagram import generate_diagram
+
+    # Get the top-level GVSOC component from the target
+    top = target.get_systree()
+
+    # The actual component tree is inside the gvsoc Component hierarchy
+    # We need to find it — it's typically the component that has bindings/components
+    gvsoc_comp = _find_gvsoc_component(top)
+    if gvsoc_comp is None:
+        print("Error: could not find the GVSoC component tree in the target")
+        return
+
+    output = getattr(args, 'diagram_output', None) or 'architecture.dot'
+    target_name = getattr(args, 'target', None) or 'GVSoC Target'
+
+    generate_diagram(gvsoc_comp, output, target_name=target_name)
+
+
+def _find_gvsoc_component(node):
+    """Walk the SystemTreeNode hierarchy to find the gvsoc Component subtree."""
+    # Check if this node itself is a gvsoc Component with components dict
+    if hasattr(node, 'components') and isinstance(getattr(node, 'components'), dict) and \
+            len(node.components) > 0:
+        return node
+
+    # Check children (SystemTreeNode uses _get_childs)
+    childs = []
+    if hasattr(node, '_get_childs'):
+        childs = node._get_childs()
+    elif hasattr(node, 'components'):
+        childs = list(node.components.values())
+
+    for child in childs:
+        result = _find_gvsoc_component(child)
+        if result is not None:
+            return result
+
+    return None
+
 
 def __print_available_commands():
     print('Available commands:')
@@ -145,6 +187,9 @@ def handle_command(target: Target, command: str, args: argparse.Namespace):
 
     if command == 'target_gen':
         target.target_gen_walk(os.path.join(args.work_dir, 'build'))
+
+    if command == 'diagram':
+        generate_diagram_cmd(target, args)
 
 def parse_parameter_arg_values(parameters: list[str]):
     set_parameters(parameters)
