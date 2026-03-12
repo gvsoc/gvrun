@@ -93,6 +93,10 @@ _ = parser.add_argument("--platform", dest="platform", default=default_platform,
     choices=['fpga', 'board', 'rtl', 'gvsoc'],
     type=str, help="specify the platform used for the target")
 
+_ = parser.add_argument("--no-group", dest="no_group", action="store_true",
+    default=False,
+    help="For diagram command: show all instances instead of grouping similar components")
+
 # Do a first argument parse so that we can get the target and add more arguments, depending on
 # the target
 [args, otherArgs] = parser.parse_known_args()
