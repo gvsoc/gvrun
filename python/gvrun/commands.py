@@ -112,8 +112,9 @@ def generate_diagram_cmd(target: Target, args: argparse.Namespace):
 
     output = getattr(args, 'diagram_output', None) or 'architecture.dot'
     target_name = getattr(args, 'target', None) or 'GVSoC Target'
+    group_similar = not getattr(args, 'no_group', False)
 
-    generate_diagram(gvsoc_comp, output, target_name=target_name)
+    generate_diagram(gvsoc_comp, output, target_name=target_name, group_similar=group_similar)
 
 
 def _find_gvsoc_component(node):

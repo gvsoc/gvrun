@@ -115,9 +115,10 @@ def _classify_edge(master_port, slave_port):
 class DiagramBuilder:
     """Builds a graphviz diagram from the GVSoC component tree."""
 
-    def __init__(self, top_component, target_name=None):
+    def __init__(self, top_component, target_name=None, group_similar=True):
         self.top = top_component
         self.target_name = target_name or 'GVSoC Target'
+        self.group_similar = group_similar
         self.lines = []
         self.node_map = {}       # comp_path -> node_id
         self.leaf_nodes = set()  # set of node_ids that are actual graphviz nodes
@@ -181,15 +182,19 @@ class DiagramBuilder:
 
         # Container
         self.container_comps.add(path)
-        groups = _detect_groups(comp)
 
         if is_top:
-            for group_name, members in groups.items():
-                if len(members) >= 3:
-                    self._emit_group(comp, group_name, members, depth, indent)
-                else:
-                    for name, child in members:
-                        self._emit_component(child, depth)
+            if self.group_similar:
+                groups = _detect_groups(comp)
+                for group_name, members in groups.items():
+                    if len(members) >= 3:
+                        self._emit_group(comp, group_name, members, depth, indent)
+                    else:
+                        for name, child in members:
+                            self._emit_component(child, depth)
+            else:
+                for child_name, child in children.items():
+                    self._emit_component(child, depth)
             return
 
         cluster_name = f'cluster_{node_id}'
@@ -201,13 +206,18 @@ class DiagramBuilder:
         self._emit(f'{indent}    fontsize=10;')
         self._emit('')
 
-        for group_name, members in groups.items():
-            if len(members) >= 3:
-                self._emit_group(comp, group_name, members, depth + 1,
-                                 indent + '    ')
-            else:
-                for name, child in members:
-                    self._emit_component(child, depth + 1)
+        if self.group_similar:
+            groups = _detect_groups(comp)
+            for group_name, members in groups.items():
+                if len(members) >= 3:
+                    self._emit_group(comp, group_name, members, depth + 1,
+                                     indent + '    ')
+                else:
+                    for name, child in members:
+                        self._emit_component(child, depth + 1)
+        else:
+            for child_name, child in children.items():
+                self._emit_component(child, depth + 1)
 
         self._emit(f'{indent}}}')
         self._emit('')
@@ -523,7 +533,7 @@ def _detect_groups(comp):
     return groups
 
 
-def generate_diagram(top_component, output_path, target_name=None):
+def generate_diagram(top_component, output_path, target_name=None, group_similar=True):
     """Generate a Graphviz .dot file from the GVSoC component tree.
 
     Parameters
@@ -534,8 +544,10 @@ def generate_diagram(top_component, output_path, target_name=None):
         Path where the .dot file should be written.
     target_name : str, optional
         Name of the target for the diagram title.
+    group_similar : bool, optional
+        If True (default), group repeated similar components. If False, show all instances.
     """
-    builder = DiagramBuilder(top_component, target_name)
+    builder = DiagramBuilder(top_component, target_name, group_similar=group_similar)
     dot_content = builder.build()
 
     with open(output_path, 'w') as f:
