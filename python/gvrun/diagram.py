@@ -510,6 +510,23 @@ def _get_component_info(comp):
     return info
 
 
+def _compute_base_name(name):
+    """Compute a base name for grouping by removing numeric indices.
+
+    Examples:
+        pe0       → pe
+        pe0_ico   → pe_ico
+        bank_0    → bank
+        bank_31   → bank
+        cluster_0 → cluster
+        l0_bank0  → l0_bank
+    """
+    # Replace sequences of digits (optionally preceded by _) that appear
+    # between word parts or at the end
+    # Strategy: replace _N or N where N is digits, but keep surrounding text
+    return re.sub(r'_?\d+', '', name)
+
+
 def _detect_groups(comp):
     children = getattr(comp, 'components', {})
     if not children:
@@ -518,7 +535,7 @@ def _detect_groups(comp):
     by_class = defaultdict(list)
     for name, child in children.items():
         child_class = type(child).__name__
-        base = re.sub(r'_?\d+$', '', name)
+        base = _compute_base_name(name)
         key = (base, child_class)
         by_class[key].append((name, child))
 
