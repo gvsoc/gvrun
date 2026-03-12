@@ -26,10 +26,11 @@ The diagram shows:
   - Port bindings as directed edges between components
   - Repeated similar components (e.g., memory banks) collapsed into single summary nodes
   - Hierarchical port-forwarding edges resolved to actual endpoints
+  - Auto-generated legend based on the edge types actually present in the target
 """
 
 import re
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 
 
 # Color palette by nesting depth
@@ -44,19 +45,34 @@ _DEPTH_STYLES = [
     {"fill": "#ffebee", "border": "#c62828", "node": "#ef9a9a"},    # red
 ]
 
-# Edge colors by interface type
-_EDGE_STYLES = {
-    'wide':    {'color': '#1565c0', 'penwidth': '2.5', 'label_prefix': 'Wide AXI'},
-    'narrow':  {'color': '#43a047', 'penwidth': '1.5', 'label_prefix': 'Narrow AXI'},
-    'tcdm':    {'color': '#e65100', 'penwidth': '2.0', 'label_prefix': 'TCDM'},
-    'dma':     {'color': '#7b1fa2', 'penwidth': '2.0', 'label_prefix': 'DMA'},
-    'fetch':   {'color': '#0288d1', 'penwidth': '1.0', 'style': 'dashed'},
-    'control': {'color': '#999999', 'penwidth': '1.0', 'style': 'dashed'},
-    'default': {'color': '#555555', 'penwidth': '1.0'},
-}
+# A pool of distinguishable colors for auto-assigned edge categories
+_EDGE_COLOR_POOL = [
+    '#1565c0',  # blue
+    '#43a047',  # green
+    '#e65100',  # orange
+    '#7b1fa2',  # purple
+    '#0288d1',  # light blue
+    '#c62828',  # red
+    '#00838f',  # teal
+    '#4e342e',  # brown
+    '#ad1457',  # pink
+    '#1b5e20',  # dark green
+    '#e65100',  # deep orange
+    '#283593',  # indigo
+]
 
 # Infrastructure ports to skip
 _INFRA_PORTS = {'clock', 'reset', 'power_supply', 'voltage'}
+
+# Control signal keywords (for any architecture)
+_CONTROL_KEYWORDS = [
+    'irq', 'interrupt', 'fetchen', 'flush', 'enable', 'grant', 'offload',
+    'external', 'meip', 'start', 'entry', 'barrier', 'wake', 'halt',
+    'debug', 'ebreak', 'reset', 'ack', 'err', 'busy', 'ready', 'valid',
+]
+
+# Instruction fetch keywords
+_FETCH_KEYWORDS = ['fetch', 'icache', 'refill', 'instr']
 
 
 def _sanitize_id(path):
@@ -90,26 +106,134 @@ def _format_size(size):
     return f'{size} B'
 
 
-def _classify_edge(master_port, slave_port):
-    """Determine the type of an edge based on port names."""
-    ports = f'{master_port}_{slave_port}'.lower()
+def _get_bandwidth(comp):
+    """Get the bandwidth property of a component, if any."""
+    props = getattr(comp, 'properties', {})
+    if isinstance(props, dict):
+        bw = props.get('bandwidth')
+        if bw is not None and isinstance(bw, (int, float)):
+            return int(bw)
+    return None
 
-    if 'wide' in ports or ('axi' in ports and ('64' in ports or 'wide' in ports)):
-        return 'wide'
-    if 'fetch' in ports or 'icache' in ports or 'refill' in ports:
-        return 'fetch'
-    if 'tcdm' in ports or 'vlsu' in ports:
-        return 'tcdm'
-    if 'dma' in ports:
-        return 'dma'
-    if any(kw in ports for kw in ['irq', 'fetchen', 'flush', 'enable', 'grant',
-                                   'offload', 'external', 'meip', 'start']):
-        return 'control'
-    if 'narrow' in ports:
-        return 'narrow'
-    if 'input' in ports or 'out' in ports or 'hbm' in ports:
-        return 'narrow'  # default data path
-    return 'default'
+
+class EdgeClassifier:
+    """Discovers and classifies edge types based on actual component properties.
+
+    Instead of hardcoded categories, this builds categories dynamically:
+    - Data paths are classified by bandwidth (from router/interconnect properties)
+    - Instruction fetch paths detected by port name keywords
+    - Control/IRQ paths detected by port name keywords
+    - DMA paths detected by component class or port names
+    - Everything else gets a generic 'data' category
+    """
+
+    def __init__(self):
+        # comp_path -> component info dict
+        self.comp_info = {}
+        # Discovered categories: key -> {label, color, penwidth, style, order}
+        self.categories = OrderedDict()
+        self._color_idx = 0
+
+    def register_component(self, comp):
+        """Register a component's properties for later edge classification."""
+        path = _get_comp_path(comp)
+        cls_name = type(comp).__name__
+        bw = _get_bandwidth(comp)
+        self.comp_info[path] = {
+            'class': cls_name,
+            'bandwidth': bw,
+        }
+
+    def classify(self, master_comp, master_port, slave_comp, slave_port):
+        """Classify an edge and return a category key.
+
+        The category is auto-created if not yet seen.
+        """
+        ports_lower = f'{master_port}_{slave_port}'.lower()
+        master_path = _get_comp_path(master_comp)
+        slave_path = _get_comp_path(slave_comp)
+        master_info = self.comp_info.get(master_path, {})
+        slave_info = self.comp_info.get(slave_path, {})
+        master_cls = master_info.get('class', '').lower()
+        slave_cls = slave_info.get('class', '').lower()
+
+        # 1. Control / IRQ signals
+        if any(kw in ports_lower for kw in _CONTROL_KEYWORDS):
+            return self._ensure_category('control', 'Control / IRQ',
+                                         penwidth='1.0', style='dashed',
+                                         priority=90)
+
+        # 2. Instruction fetch
+        if any(kw in ports_lower for kw in _FETCH_KEYWORDS):
+            return self._ensure_category('fetch', 'Instruction fetch',
+                                         penwidth='1.5', style='dashed',
+                                         priority=80)
+
+        # 3. DMA paths
+        if 'dma' in ports_lower or 'dma' in master_cls or 'dma' in slave_cls:
+            return self._ensure_category('dma', 'DMA',
+                                         penwidth='2.0', priority=30)
+
+        # 4. Data paths — classify by bandwidth
+        # Look at the bandwidth of the master or slave if they're routers/interconnects
+        bw = None
+        router_classes = ['router', 'interleaver', 'crossbar', 'xbar', 'noc', 'axi']
+        for info in [master_info, slave_info]:
+            cls = info.get('class', '').lower()
+            if any(rc in cls for rc in router_classes) and info.get('bandwidth'):
+                bw = info['bandwidth']
+                break
+
+        if bw is not None:
+            cat_key = f'data_{bw}B'
+            label = f'Data path ({bw}B = {bw*8}b)'
+            pw = '1.5' if bw <= 8 else ('2.0' if bw <= 32 else '2.5')
+            return self._ensure_category(cat_key, label, penwidth=pw, priority=bw)
+
+        # 5. Memory / interleaver paths (TCDM-like)
+        mem_keywords = ['tcdm', 'vlsu', 'spm', 'scratchpad', 'l1']
+        if any(kw in ports_lower for kw in mem_keywords) or \
+           any(kw in master_cls for kw in mem_keywords) or \
+           any(kw in slave_cls for kw in mem_keywords):
+            return self._ensure_category('local_mem', 'Local memory',
+                                         penwidth='2.0', priority=40)
+
+        # 6. Default data path
+        return self._ensure_category('data', 'Data',
+                                     penwidth='1.0', priority=50)
+
+    def _ensure_category(self, key, label, penwidth='1.0', style=None, priority=50):
+        """Ensure a category exists; create it with an auto-assigned color if new."""
+        if key not in self.categories:
+            color = self._next_color()
+            cat = {
+                'label': label,
+                'color': color,
+                'penwidth': penwidth,
+                'priority': priority,
+            }
+            if style:
+                cat['style'] = style
+            self.categories[key] = cat
+        return key
+
+    def _next_color(self):
+        """Get the next color from the pool."""
+        color = _EDGE_COLOR_POOL[self._color_idx % len(_EDGE_COLOR_POOL)]
+        self._color_idx += 1
+        return color
+
+    def get_style(self, category_key):
+        """Get the visual style for a category."""
+        return self.categories.get(category_key, {
+            'color': '#555555', 'penwidth': '1.0', 'label': 'Unknown'
+        })
+
+    def get_legend_entries(self):
+        """Return legend entries sorted by priority, only for categories that were used."""
+        entries = sorted(self.categories.items(),
+                         key=lambda x: x[1].get('priority', 50))
+        return [(cat['label'], cat) for _, cat in entries]
 
 
 class DiagramBuilder:
@@ -123,12 +247,15 @@ class DiagramBuilder:
         self.node_map = {}       # comp_path -> node_id
         self.leaf_nodes = set()  # set of node_ids that are actual graphviz nodes
         self.container_comps = set()  # paths of components that are subgraphs
-
-        # For resolving hierarchical port forwarding
-        # port_forwarding: (comp_path, port_name) -> (resolved_comp_path, resolved_port_name)
         self.port_forwarding = {}
+        self.edge_classifier = EdgeClassifier()
+        # Track which categories are actually emitted
+        self.used_categories = set()
 
     def build(self):
+        # Register all components for classification
+        self._register_all_components(self.top)
+
         self._emit(f'digraph "{self.target_name}" {{')
         self._emit('    rankdir=TB;')
         self._emit('    newrank=true;')
@@ -156,12 +283,18 @@ class DiagramBuilder:
         self._emit('    // ===================== CONNECTIONS =====================')
         self._emit_bindings()
 
-        # Legend
+        # Legend (auto-generated from used categories)
         self._emit('')
         self._emit_legend()
 
         self._emit('}')
         return '\n'.join(self.lines)
+
+    def _register_all_components(self, comp):
+        """Register all components in the tree for edge classification."""
+        self.edge_classifier.register_component(comp)
+        for child in getattr(comp, 'components', {}).values():
+            self._register_all_components(child)
 
     def _emit(self, line):
         self.lines.append(line)
@@ -176,11 +309,9 @@ class DiagramBuilder:
         self.node_map[path] = node_id
 
         if not children:
-            # Leaf node
             self._emit_leaf(comp, path, node_id, depth, indent)
             return
 
-        # Container
         self.container_comps.add(path)
 
         if is_top:
@@ -241,35 +372,23 @@ class DiagramBuilder:
         self.leaf_nodes.add(node_id)
 
     def _emit_group(self, parent_comp, group_name, members, depth, indent):
-        """Emit a group of similar components.
-
-        - If the members are leaf components (no children), collapse all into a single summary node.
-        - If the members are complex (have sub-components), show the first one expanded in detail
-          and emit a summary node for the remaining N-1 instances.
-        """
         _, first_child = members[0]
         first_has_children = len(getattr(first_child, 'components', {})) > 0
 
         if first_has_children:
-            # Complex group: expand the first one, collapse the rest
             first_name, first_child = members[0]
             self._emit_component(first_child, depth)
-
             if len(members) > 1:
-                # Summary node for the rest
                 remaining = members[1:]
                 self._emit_group_summary(parent_comp, group_name, first_name,
                                          remaining, depth, indent)
         else:
-            # Simple leaf group: collapse all into one summary node
             self._emit_group_node(parent_comp, group_name, members, depth, indent)
 
     def _emit_group_summary(self, parent_comp, group_name, representative_name,
                             remaining_members, depth, indent):
-        """Emit a summary node for remaining instances of a complex group."""
         style = _DEPTH_STYLES[depth % len(_DEPTH_STYLES)]
         count = len(remaining_members)
-
         _, first = remaining_members[0]
         info = _get_component_info(first)
 
@@ -287,15 +406,12 @@ class DiagramBuilder:
         self.node_map[group_path] = group_id
         self.leaf_nodes.add(group_id)
 
-        # Map all remaining member paths to this summary node
         for name, child in remaining_members:
             child_path = _get_comp_path(child)
             self.node_map[child_path] = group_id
-            # Also map all descendants of collapsed members
             self._map_descendants(child, group_id)
 
     def _map_descendants(self, comp, target_id):
-        """Recursively map all descendants of a component to a target node ID."""
         for child_name, child in getattr(comp, 'components', {}).items():
             child_path = _get_comp_path(child)
             self.node_map[child_path] = target_id
@@ -344,38 +460,25 @@ class DiagramBuilder:
             self.node_map[child_path] = group_id
 
     def _build_port_forwarding(self):
-        """Build a map that resolves hierarchical port forwarding.
-
-        When a container component binds `self->port_a` to `child->port_b`,
-        it means port_a on the container is actually port_b on the child.
-        We follow these chains to resolve to leaf endpoints.
-        """
         all_bindings = []
         self._collect_bindings(self.top, all_bindings)
 
-        # Build forwarding table: (comp_path, port) -> (comp_path, port)
         fwd = {}
         for binding in all_bindings:
-            master_comp, master_port, slave_comp, slave_port = binding[0], binding[1], binding[2], binding[3]
+            master_comp, master_port, slave_comp, slave_port = \
+                binding[0], binding[1], binding[2], binding[3]
             master_path = _get_comp_path(master_comp)
             slave_path = _get_comp_path(slave_comp)
 
-            # Check if this is a parent binding with self
-            parent = getattr(master_comp, 'parent', None) if hasattr(master_comp, 'parent') else None
-
-            # Self → child: the container's port is forwarded to the child's port
             if master_path in self.container_comps and slave_path != master_path:
-                # master (container) port → slave (child) port
                 fwd[(master_path, master_port)] = (slave_path, slave_port)
 
             if slave_path in self.container_comps and master_path != slave_path:
-                # child → container port: the container's port is forwarded from the child
                 fwd[(slave_path, slave_port)] = (master_path, master_port)
 
         self.port_forwarding = fwd
 
     def _resolve_endpoint(self, comp_path, port, depth=0):
-        """Resolve a (comp_path, port) through forwarding chains to a leaf."""
         if depth > 20:
             return comp_path, port
 
@@ -383,7 +486,6 @@ class DiagramBuilder:
         if node_id is not None and node_id in self.leaf_nodes:
             return comp_path, port
 
-        # Try forwarding
         resolved = self.port_forwarding.get((comp_path, port))
         if resolved is not None:
             return self._resolve_endpoint(resolved[0], resolved[1], depth + 1)
@@ -409,6 +511,10 @@ class DiagramBuilder:
             if master_path == slave_path:
                 continue
 
+            # Classify using original components (before resolution)
+            cat_key = self.edge_classifier.classify(
+                master_comp, master_port, slave_comp, slave_port)
+
             # Resolve through forwarding
             master_path, master_port = self._resolve_endpoint(master_path, master_port)
             slave_path, slave_port = self._resolve_endpoint(slave_path, slave_port)
@@ -416,22 +522,20 @@ class DiagramBuilder:
             master_id = self.node_map.get(master_path, _sanitize_id(master_path))
             slave_id = self.node_map.get(slave_path, _sanitize_id(slave_path))
 
-            # Skip if either endpoint doesn't have a real node
             if master_id not in self.leaf_nodes or slave_id not in self.leaf_nodes:
                 continue
 
             if master_id == slave_id:
                 continue
 
-            edge_key = (master_id, slave_id, master_port, slave_port)
             dedup_key = (master_id, slave_id)
             if dedup_key in seen:
                 continue
             seen.add(dedup_key)
 
-            # Classify and style the edge
-            edge_type = _classify_edge(master_port, slave_port)
-            estyl = _EDGE_STYLES.get(edge_type, _EDGE_STYLES['default'])
+            # Get style from classifier
+            estyl = self.edge_classifier.get_style(cat_key)
+            self.used_categories.add(cat_key)
 
             attrs = [
                 f'color="{estyl["color"]}"',
@@ -441,7 +545,6 @@ class DiagramBuilder:
             if 'style' in estyl:
                 attrs.append(f'style={estyl["style"]}')
 
-            # Tooltip with port info
             attrs.append(f'edgetooltip="{master_port} → {slave_port}"')
 
             # Label for mapped regions
@@ -462,7 +565,17 @@ class DiagramBuilder:
             self._emit(f'    {master_id} -> {slave_id}{attr_str};')
 
     def _emit_legend(self):
-        """Emit a legend subgraph."""
+        """Emit a legend subgraph with only the edge types that actually appear."""
+        legend_entries = self.edge_classifier.get_legend_entries()
+        # Filter to only used categories
+        legend_entries = [(label, cat) for label, cat in legend_entries
+                          if any(k in self.used_categories
+                                 for k, v in self.edge_classifier.categories.items()
+                                 if v['label'] == label)]
+
+        if not legend_entries:
+            return
+
         self._emit('    subgraph cluster_legend {')
         self._emit('        label="Legend";')
         self._emit('        style="filled,rounded"; fillcolor="#f5f5f5"; color="#cccccc";')
@@ -471,16 +584,12 @@ class DiagramBuilder:
         self._emit('')
         self._emit('        legend [label=<')
         self._emit('            <TABLE BORDER="0" CELLBORDER="0" CELLSPACING="4">')
-        for name, estyl in [
-            ('Wide AXI (512b)', _EDGE_STYLES['wide']),
-            ('Narrow AXI (64b)', _EDGE_STYLES['narrow']),
-            ('TCDM / VLSU', _EDGE_STYLES['tcdm']),
-            ('DMA', _EDGE_STYLES['dma']),
-            ('Instruction fetch', _EDGE_STYLES['fetch']),
-            ('Control / IRQ', _EDGE_STYLES['control']),
-        ]:
-            self._emit(f'            <TR><TD><FONT COLOR="{estyl["color"]}">━━━</FONT></TD>'
-                       f'<TD ALIGN="LEFT"><FONT POINT-SIZE="8">{name}</FONT></TD></TR>')
+
+        for label, cat in legend_entries:
+            line_style = '━━━' if 'style' not in cat else '╌╌╌'
+            self._emit(f'            <TR><TD><FONT COLOR="{cat["color"]}">{line_style}</FONT></TD>'
+                       f'<TD ALIGN="LEFT"><FONT POINT-SIZE="8">{label}</FONT></TD></TR>')
+
         self._emit('            <TR><TD></TD><TD ALIGN="LEFT">'
                    '<FONT POINT-SIZE="8">Arrow = master → slave</FONT></TD></TR>')
         self._emit('            </TABLE>')
@@ -521,9 +630,6 @@ def _compute_base_name(name):
         cluster_0 → cluster
         l0_bank0  → l0_bank
     """
-    # Replace sequences of digits (optionally preceded by _) that appear
-    # between word parts or at the end
-    # Strategy: replace _N or N where N is digits, but keep surrounding text
     return re.sub(r'_?\d+', '', name)
 
 
