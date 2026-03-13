@@ -592,6 +592,22 @@ class Config:
         os.makedirs(outdir, exist_ok=True)
         self._generate_header_tree(outdir, "", filename, prefix)
 
+    def generate_cpp_header(self, output_path: str | None = None) -> str:
+        """Generate a C++ config struct header from this Config class.
+
+        Parameters
+        ----------
+        output_path : str, optional
+            If provided, write the header to this file.
+
+        Returns
+        -------
+        str
+            The generated C++ header content.
+        """
+        from gvrun.config_gen import generate_cpp_header
+        return generate_cpp_header(type(self), output_path=output_path)
+
 def cfg_field(
     *,
     default: Any = MISSING,
