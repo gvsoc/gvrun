@@ -38,6 +38,7 @@ Key Features:
 from __future__ import annotations
 import json
 import enum
+import os
 from dataclasses import fields, is_dataclass, dataclass, field
 from typing import Any, cast, get_args, get_origin
 from dataclasses import MISSING
@@ -174,6 +175,120 @@ class Config:
                     parts.append(f"{f.name}={value}")
 
         return f"{self.__class__.__name__}({', '.join(parts)})"
+
+    def _collect_defines(self, prefix: str = "CONFIG") -> list[tuple[str, str, str]]:
+        """
+        Recursively collect C preprocessor defines from this config tree.
+
+        Walks all dataclass fields. Leaf values (int, bool, str, float, enum) produce a
+        ``#define``.  Nested ``Config`` subclasses and lists of ``Config`` are recursed into.
+        Fields inherited from the ``Config`` base (parent, name, path) are skipped.
+
+        Args:
+            prefix: Underscore-separated prefix for the define name
+                    (e.g. ``"CONFIG"`` → ``CONFIG_FREQUENCY``).
+
+        Returns:
+            List of (define_name, define_value, description) tuples.
+        """
+        result: list[tuple[str, str, str]] = []
+        _base_names = {"parent", "name", "path"}
+
+        for f in fields(self):
+            if f.name in _base_names:
+                continue
+
+            value = getattr(self, f.name, None)
+            if value is None:
+                continue
+
+            define_name = f"{prefix}_{f.name.upper()}"
+            desc = f.metadata.get("description", "") if f.metadata else ""
+            fmt = f.metadata.get("format") if f.metadata else None
+
+            # Nested Config → recurse
+            if isinstance(value, Config):
+                result += value._collect_defines(define_name)
+                continue
+
+            # List of Configs → recurse with index
+            if isinstance(value, (list, tuple)):
+                all_config = all(isinstance(v, Config) for v in value)
+                if all_config and len(value) > 0:
+                    result.append((f"{define_name}_COUNT", str(len(value)), f"Number of {f.name}"))
+                    for i, item in enumerate(value):
+                        result += item._collect_defines(f"{define_name}_{i}")
+                    continue
+
+            # Leaf value → format
+            if isinstance(value, bool):
+                c_value = "1" if value else "0"
+            elif isinstance(value, int):
+                if fmt == "hex":
+                    c_value = f"0x{value:08x}"
+                else:
+                    c_value = str(value)
+            elif isinstance(value, float):
+                c_value = str(value)
+            elif isinstance(value, str):
+                c_value = f'"{value}"'
+            elif isinstance(value, enum.Enum):
+                v = value.value
+                if isinstance(v, int):
+                    c_value = str(v)
+                else:
+                    c_value = f'"{v}"'
+            else:
+                # Skip types we can't represent
+                continue
+
+            result.append((define_name, c_value, desc))
+
+        return result
+
+    def generate_header(self, path: str, prefix: str = "CONFIG",
+                        guard: str | None = None) -> None:
+        """
+        Generate a C header file with ``#define`` directives from this config tree.
+
+        The header contains an include guard and one ``#define`` per leaf field, with
+        optional comments taken from the field description.
+
+        Args:
+            path:   Output file path.  Parent directories are created automatically.
+            prefix: Prefix for all define names (default ``"CONFIG"``).
+            guard:  Include-guard macro name.  If *None*, one is derived from *path*.
+
+        """
+        defines = self._collect_defines(prefix)
+
+        if guard is None:
+            guard = "_" + os.path.basename(path).upper().replace(".", "_").replace("-", "_") + "_"
+
+        # Align values for readability
+        max_name_len = max((len(name) for name, _, _ in defines), default=0)
+
+        lines: list[str] = []
+        lines.append(f"#ifndef {guard}")
+        lines.append(f"#define {guard}")
+        lines.append("")
+        lines.append("/* Auto-generated from GVSoC Config tree — do not edit */")
+        lines.append("")
+
+        for name, value, desc in defines:
+            if desc:
+                lines.append(f"/* {desc} */")
+            padding = " " * (max_name_len - len(name) + 2)
+            lines.append(f"#define {name}{padding}{value}")
+
+        lines.append("")
+        lines.append(f"#endif /* {guard} */")
+        lines.append("")
+
+        os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+
+        with open(path, "w") as fh:
+            fh.write("\n".join(lines))
 
 def cfg_field(
     *,
