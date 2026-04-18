@@ -81,7 +81,7 @@ def _collect_scalar_defines(
     """Collect (define_name, c_value, description) for readable scalar fields."""
     result: list[tuple[str, str, str]] = []
     for f in fields(config):
-        if f.name in _BASE_FIELD_NAMES or not _is_readable(config, f.name):
+        if f.name in _BASE_FIELD_NAMES:
             continue
         value = getattr(config, f.name, None)
         if value is None or isinstance(value, Config):
