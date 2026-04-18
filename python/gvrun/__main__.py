@@ -168,11 +168,10 @@ def main(argv: list[str] | None = None) -> int:
         selected_target = None
         if args.target is not None:
             target_name = args.target
-            parameters = []
-            if target_name.find(':') != -1:
-                target_name, parameters = target_name.split(':')
-                for property_desc in parameters.split(','):
-                    args.parameters.append(property_desc)
+            from gvrun.target_qualifiers import parse_target_string, apply_target_qualifiers
+            parsed = parse_target_string(target_name)
+            target_name = parsed.name
+            apply_target_qualifiers(parsed, args)
 
             target_class = gvrun.target.get_target(target_name)
             target_kwargs = {
