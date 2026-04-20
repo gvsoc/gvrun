@@ -6,25 +6,39 @@
 
 """Parse structured qualifiers from target name strings.
 
-Supports two forms after the target name:
+Syntax after the target name: ``qualifier.KEY=VALUE`` entries separated by
+colons. Chosen for shell-friendliness — no parentheses to quote.
 
-Legacy (bare key=value):
-    target:key1=val1,key2=val2
+    target:attr.chip/cluster/has_redmule=true
+    target:config.chip/nb_cus=2
+    target:attr.soc/l2/size=0x20000:config.chip/nb_cus=2
 
-Structured (named qualifiers):
-    target:config(chip/nb_cus=2,frequency=100000000):param(size=100)
-    target:attr(soc/l2/size=0x20000)
+One key=value per qualifier; repeat the qualifier to set multiple keys.
+
+Bare form (no qualifier prefix) is accepted as a shortcut for
+``--parameter`` and supports comma-separated multi-key lists — kept for
+backward compatibility with existing Makefile-driven tests that build
+the target string by joining options. It feeds the same parameter
+registry as ``--parameter``, so it is matched against declared
+``TargetParameter`` / ``BuildParameter`` / ``ArchParameter`` instances:
+
+    target:access_type=rw,synchronous=false,target_bw=4
+      == --parameter access_type=rw --parameter synchronous=false \\
+         --parameter target_bw=4
 
 Available qualifiers:
-    config  — Override config_tree Config dataclass fields.
-    param   — Override build parameters.
-    attr    — Override attributes (low-level properties passed to C++ models).
+    config  — Override fields on the target's top ``config_tree.Config``.
+    attr    — Override per-component attributes (Config-backed or legacy
+              ``Value``/``Tree``).
 """
 
 import argparse
 import re
 from dataclasses import dataclass, field
 
+from config_tree import Config
+
+import gvrun.attribute
 import gvrun.commands
 
 
@@ -35,104 +49,123 @@ class ParsedTarget:
     qualifiers: list[tuple[str, list[str]]] = field(default_factory=list)
 
 
+_QUALIFIER_NAME_RE = re.compile(r'^[a-zA-Z_]\w*$')
+
+
 def parse_target_string(raw: str) -> ParsedTarget:
     """Parse a target string into name and qualifiers.
 
     Parameters
     ----------
     raw : str
-        The raw target string, e.g. "target:config(chip/nb_cus=2)".
+        The raw target string, e.g. ``"target:config.chip/nb_cus=2"``.
 
     Returns
     -------
     ParsedTarget
         Parsed target name and qualifier list.
     """
-    colon_pos = raw.find(':')
-    if colon_pos == -1:
-        return ParsedTarget(name=raw)
+    parts = raw.split(':')
+    name = parts[0]
 
-    name = raw[:colon_pos]
-    remainder = raw[colon_pos + 1:]
+    qualifiers: list[tuple[str, list[str]]] = []
+    for segment in parts[1:]:
+        if not segment:
+            continue
 
-    if not remainder:
-        return ParsedTarget(name=name)
+        # Distinguish "qualifier.KEY=VALUE" from the bare form
+        # "KEY=VALUE[,KEY=VALUE...]". The bare form is backward-compat
+        # sugar for the attr qualifier with comma-separated multi-key
+        # support. We detect it by checking whether the part before any
+        # '.' looks like a qualifier name (identifier-only). The first
+        # KEY of a bare form can contain '/' which rules out the
+        # qualifier-dot form.
+        is_bare = True
+        if '.' in segment:
+            head, _ = segment.split('.', 1)
+            if _QUALIFIER_NAME_RE.match(head) and head in QUALIFIER_HANDLERS:
+                is_bare = False
 
-    # Detect structured vs legacy mode
-    if re.match(r'[a-zA-Z_]\w*\(', remainder):
-        qualifiers = _parse_structured(remainder, raw)
-    else:
-        # Legacy: bare key=val,key2=val2 → treated as param qualifier
-        qualifiers = [('param', remainder.split(','))]
+        if is_bare:
+            if '=' not in segment:
+                raise RuntimeError(
+                    f"Malformed target qualifier '{segment}' in '{raw}': "
+                    f"expected 'name.KEY=VALUE' (e.g. "
+                    f"'attr.chip/cluster/foo=true') or a bare "
+                    f"'KEY=VALUE[,KEY=VALUE...]' list")
+            bare_values: list[str] = []
+            for kv in segment.split(','):
+                kv = kv.strip()
+                if not kv:
+                    continue
+                if '=' not in kv:
+                    raise RuntimeError(
+                        f"Malformed bare target qualifier entry '{kv}' in "
+                        f"'{raw}': expected KEY=VALUE")
+                bare_values.append(kv)
+            if bare_values:
+                qualifiers.append(('__bare__', bare_values))
+            continue
+
+        qualifier_name, rest = segment.split('.', 1)
+        if '=' not in rest:
+            raise RuntimeError(
+                f"Malformed target qualifier '{segment}' in '{raw}': "
+                f"expected a KEY=VALUE pair after '{qualifier_name}.'")
+        qualifiers.append((qualifier_name, [rest]))
 
     return ParsedTarget(name=name, qualifiers=qualifiers)
 
 
-def _parse_structured(remainder: str, raw: str) -> list[tuple[str, list[str]]]:
-    """Parse structured qualifier groups like 'config(a=1,b=2):param(c=3)'."""
-    qualifiers = []
-    pos = 0
-    length = len(remainder)
-
-    while pos < length:
-        # Extract qualifier name
-        paren_pos = remainder.find('(', pos)
-        if paren_pos == -1:
-            raise RuntimeError(
-                f"Malformed target qualifier in '{raw}': expected '(' after "
-                f"qualifier name at position {pos}")
-
-        qualifier_name = remainder[pos:paren_pos]
-        if not qualifier_name or not re.match(r'^[a-zA-Z_]\w*$', qualifier_name):
-            raise RuntimeError(
-                f"Malformed target qualifier in '{raw}': invalid qualifier "
-                f"name '{qualifier_name}'")
-
-        # Find matching closing paren
-        close_pos = remainder.find(')', paren_pos + 1)
-        if close_pos == -1:
-            raise RuntimeError(
-                f"Malformed target qualifier in '{raw}': unclosed parenthesis "
-                f"for qualifier '{qualifier_name}'")
-
-        content = remainder[paren_pos + 1:close_pos]
-        args = [a for a in content.split(',') if a] if content else []
-        qualifiers.append((qualifier_name, args))
-
-        pos = close_pos + 1
-        if pos < length:
-            if remainder[pos] != ':':
-                raise RuntimeError(
-                    f"Malformed target qualifier in '{raw}': expected ':' "
-                    f"between qualifiers at position {pos}")
-            pos += 1
-
-    return qualifiers
-
-
 # ---------------------------------------------------------------------------
-# Qualifier handlers
+# Qualifier handlers — each targets exactly one subsystem so overrides can't
+# accidentally land somewhere unintended.
 # ---------------------------------------------------------------------------
 
 def _apply_config_qualifier(values: list[str], args: argparse.Namespace):
-    """Route config overrides to Config.override_fields via parse_attribute_arg_values."""
-    gvrun.commands.parse_attribute_arg_values(values)
-
-
-def _apply_param_qualifier(values: list[str], args: argparse.Namespace):
-    """Route parameter overrides to args.parameters for later processing."""
-    args.parameters.extend(values)
+    """Override fields on the target's ``config_tree.Config`` tree only."""
+    Config.override_fields(values)
+    gvrun.commands.track_config_overrides(values)
 
 
 def _apply_attr_qualifier(values: list[str], args: argparse.Namespace):
-    """Route attribute overrides to the attribute system (low-level properties for C++ models)."""
-    gvrun.commands.parse_attribute_arg_values(values)
+    """Override component attributes only.
+
+    Feeds both component-attribute registries:
+
+    - ``gvrun.systree`` — read by ``Component.__init__`` (gvrun2) for
+      ``<component_path>/<field>`` overrides of fields supplied through a
+      ``config_tree.Config`` attached via ``config=...``. This is the path
+      that reaches the C++ model via ``add_property``.
+    - ``gvrun.attribute`` — read by ``Value.__init__`` for legacy
+      ``Tree``/``Value`` hierarchies (e.g. ``PulpOpenAttr``,
+      ``ClusterArch``).
+    """
+    import gvrun.systree
+    gvrun.systree.set_attributes(values)
+    gvrun.attribute.set_attributes(values)
+
+
+def _apply_bare_qualifier(values: list[str], args: argparse.Namespace):
+    """Route bare ``key=value`` entries to ``--parameter``.
+
+    Appends to ``args.parameters`` so the later ``parse_parameter_arg_values``
+    pass picks them up; lands in the same registry consulted by
+    ``TargetParameter`` / ``BuildParameter`` / ``ArchParameter`` lookups.
+    """
+    args.parameters.extend(values)
 
 
 QUALIFIER_HANDLERS: dict[str, callable] = {
     'config': _apply_config_qualifier,
-    'param': _apply_param_qualifier,
     'attr': _apply_attr_qualifier,
+}
+
+# Internal-only handler used when parse_target_string recognises the
+# legacy bare form. Not exposed as a valid user-facing qualifier name
+# (names starting with '__' can't be typed on a CLI anyway).
+_INTERNAL_HANDLERS: dict[str, callable] = {
+    '__bare__': _apply_bare_qualifier,
 }
 
 
@@ -148,6 +181,8 @@ def apply_target_qualifiers(parsed: ParsedTarget, args: argparse.Namespace):
     """
     for qualifier_name, values in parsed.qualifiers:
         handler = QUALIFIER_HANDLERS.get(qualifier_name)
+        if handler is None:
+            handler = _INTERNAL_HANDLERS.get(qualifier_name)
         if handler is None:
             known = ', '.join(sorted(QUALIFIER_HANDLERS))
             raise RuntimeError(

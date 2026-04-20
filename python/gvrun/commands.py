@@ -28,12 +28,14 @@ import importlib.util
 import shutil
 import subprocess
 import argparse
+import dataclasses
 try:
     from typing import override  # Python 3.12+
 except ImportError:
     from typing_extensions import override  # Python 3.10–3.11
 import gvrun.systree
 import gvrun.config
+import gvrun.attribute
 from gvrun.attribute import set_attributes
 from gvrun.parameter import set_parameters, BuildParameter
 from gvrun.builder import Builder, CommandInterface
@@ -73,6 +75,112 @@ def load_config(target: SystemTreeNode|None, args: argparse.Namespace):
         apply_flash_cli_overrides(target, args)
 
         target.configure_all()
+
+        global _current_target_root
+        _current_target_root = target
+        check_overrides_consumed()
+
+
+def _enumerate_top_config_paths(target: SystemTreeNode) -> set[str]:
+    """Return paths addressable by ``config(...)`` — the top Config only.
+
+    The "top Config" is the ``config_tree.Config`` attached to the target
+    root via ``SystemTreeNode.set_attributes`` (and its nested Configs
+    reachable through dataclass fields).
+
+    Paths are reported in the form ``<cfg_path>/<field>`` (the Config's
+    own registry path, as used by ``_do_adopt``) plus the root-relative
+    alias with the first segment stripped, matching ``_do_adopt``'s
+    two-step lookup.
+    """
+    from dataclasses import fields as dc_fields
+
+    paths: set[str] = set()
+    root_cfg = target.get_attributes() if target is not None else None
+    if not isinstance(root_cfg, Config):
+        return paths
+
+    # Collect the root Config and every nested Config reachable from it.
+    visited: set[int] = set()
+    stack = [root_cfg]
+    configs: list[Config] = []
+    while stack:
+        cfg = stack.pop()
+        if id(cfg) in visited:
+            continue
+        visited.add(id(cfg))
+        configs.append(cfg)
+        for f in dc_fields(cfg):
+            if hasattr(cfg, f.name):
+                val = getattr(cfg, f.name)
+                if isinstance(val, Config):
+                    stack.append(val)
+        stack.extend(c for c in cfg.children if isinstance(c, Config))
+
+    for cfg in configs:
+        cfg_path = cfg.path
+        for f in dc_fields(cfg):
+            if not f.init:
+                continue
+            full = f'{cfg_path}/{f.name}' if cfg_path else f.name
+            paths.add(full)
+            if '/' in full:
+                paths.add(full.split('/', 1)[1])
+    return paths
+
+
+def check_overrides_consumed():
+    """Raise if any ``config(...)``, ``attr(...)`` or ``--attribute`` key
+    went unused.
+
+    Called from ``load_config`` after ``target.configure_all()`` — by that
+    point every ``Config`` has been instantiated and every
+    ``Component``/``Value`` has read its override, so unmatched keys can
+    only be typos or paths the target doesn't expose.
+
+    ``config(...)`` is scoped to the **top** Config tree (attached to the
+    target root). ``attr(...)`` is scoped to component attributes reached
+    via either ``gvrun.systree`` (new Config-backed path) or
+    ``gvrun.attribute`` (legacy Tree/Value path).
+    """
+    target_root = _current_target_root
+
+    # --- config(...) — top Config only -----------------------------------
+    if _config_override_keys:
+        valid = _enumerate_top_config_paths(target_root)
+        unknown = [k for k in _config_override_keys if k not in valid]
+        if unknown:
+            raise RuntimeError(
+                "Unknown config. override(s): "
+                + ", ".join(f"'{k}'" for k in unknown)
+                + ". config. addresses the top Config tree attached to "
+                "the target root; use attr. for per-component "
+                "attributes reached via component paths.")
+
+    # --- attr(...) and --attribute — component attributes ----------------
+    systree_submitted = gvrun.systree.get_attribute_arg_keys()
+    systree_consumed = gvrun.systree.get_consumed_attribute_paths()
+    attr_submitted = gvrun.attribute.get_attribute_arg_keys()
+    attr_consumed = gvrun.attribute.get_consumed_attribute_paths()
+
+    # A key is considered consumed if either registry picked it up.
+    all_submitted = systree_submitted | attr_submitted
+    all_consumed = systree_consumed | attr_consumed
+    unknown_attr = sorted(all_submitted - all_consumed)
+    if unknown_attr:
+        top_paths = _enumerate_top_config_paths(target_root)
+        hints = [
+            f"'{k}' (did you mean config.{k}=...?)" if k in top_paths else f"'{k}'"
+            for k in unknown_attr
+        ]
+        raise RuntimeError(
+            "Unknown attr./--attribute override(s): "
+            + ", ".join(hints)
+            + ". No matching component attribute in the target's tree.")
+
+
+# Set by load_config so check_overrides_consumed can walk the systree.
+_current_target_root: SystemTreeNode | None = None
 
 
 def apply_flash_cli_overrides(target: SystemTreeNode, args: argparse.Namespace):
@@ -265,11 +373,34 @@ def handle_command(target: Target, command: str, args: argparse.Namespace):
 def parse_parameter_arg_values(parameters: list[str]):
     set_parameters(parameters)
 
+
+# Config-field overrides submitted via ``config(...)`` qualifier; recorded
+# here so we can detect keys that never matched a Config field after the
+# target is constructed.
+_config_override_keys: list[str] = []
+
+
+def track_config_overrides(values: list[str]):
+    """Record config(...) keys for the post-construction consumption check."""
+    for prop in values:
+        key, _ = prop.split('=', 1)
+        _config_override_keys.append(key)
+
+
 def parse_attribute_arg_values(attributes: list[str]):
-    set_attributes(attributes)
+    """Override component attributes only.
+
+    Same scope as ``attr(...)`` target qualifier — feeds both:
+
+    - ``gvrun.systree`` (picked up by ``Component.__init__`` for
+      Config-backed component properties).
+    - ``gvrun.attribute`` (picked up by ``Value.__init__`` for legacy
+      Tree/Value hierarchies).
+
+    Unmatched paths are reported by :func:`check_overrides_consumed`.
+    """
     gvrun.systree.set_attributes(attributes)
-    gvrun.config.set_attributes(attributes)
-    Config.override_fields(attributes)
+    set_attributes(attributes)
 
 def handle_commands(target: Target, args: argparse.Namespace):
 

@@ -36,6 +36,7 @@ from gvrun.builder import Builder
 from gvrun.parameter import Parameter, get_parameter_arg_value, SystemTreeNodeParameter
 
 __attribute_arg_values: dict[str, str] = {}
+__consumed_paths: set[str] = set()
 
 def set_attributes(attributes: list[str]):
     global __attribute_arg_values
@@ -46,7 +47,20 @@ def set_attributes(attributes: list[str]):
 
 
 def get_attribute_arg_value(name: str) -> str | None:
-    return __attribute_arg_values.get(name)
+    value = __attribute_arg_values.get(name)
+    if value is not None:
+        __consumed_paths.add(name)
+    return value
+
+
+def get_attribute_arg_keys() -> set[str]:
+    """Return the set of override keys submitted so far."""
+    return set(__attribute_arg_values.keys())
+
+
+def get_consumed_attribute_paths() -> set[str]:
+    """Return the set of override keys consumed by Component.__init__."""
+    return set(__consumed_paths)
 
 
 def hex_grouped(value: int, group: int = 4) -> str:

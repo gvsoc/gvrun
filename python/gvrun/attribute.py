@@ -23,6 +23,7 @@ import rich.table
 from typing_extensions import Any
 
 __attribute_arg_values: dict[str,Any] = {}
+__consumed_paths: set[str] = set()
 
 def set_attributes(attributes: list[str]):
     global __attribute_arg_values
@@ -33,7 +34,20 @@ def set_attributes(attributes: list[str]):
 
 
 def get_attribute_arg_value(name: str) -> Any:
-    return __attribute_arg_values.get(name)
+    value = __attribute_arg_values.get(name)
+    if value is not None:
+        __consumed_paths.add(name)
+    return value
+
+
+def get_attribute_arg_keys() -> set[str]:
+    """Return the set of override keys submitted so far."""
+    return set(__attribute_arg_values.keys())
+
+
+def get_consumed_attribute_paths() -> set[str]:
+    """Return the set of override keys that were consumed by Value.__init__."""
+    return set(__consumed_paths)
 
 class Attr:
     """
@@ -139,7 +153,7 @@ class Value(Attr):
 
         if self._cast is not None:
             if self._cast == int:
-                if isinstance(value, str):
+                if isinstance(self.value, str):
                     self.value = int(self.value, 0)
                 else:
                     self.value = int(self.value)
