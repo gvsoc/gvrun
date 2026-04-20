@@ -38,7 +38,7 @@ from dataclasses import fields, is_dataclass
 
 
 # Reuse field helpers from config_gen
-from gvrun.config_gen import get_config_fields, cpp_value, _SKIP_FIELDS
+from gvrun.config_gen import get_config_fields, cpp_value, _SKIP_FIELDS, runtime_field_enum
 
 
 def _path_to_ident(path: str) -> str:
@@ -136,13 +136,15 @@ def generate_tree_cpp(component, output_path: str) -> None:
     lines.append(' * Auto-generated platform tree — do not edit manually.')
     lines.append(' */')
     lines.append('')
+    lines.append('#include <cstddef>')
     lines.append('#include <vp/component_tree.hpp>')
     for inc in sorted(includes):
         lines.append(f'#include <{inc}>')
     lines.append('')
 
     # We collect all declarations bottom-up
-    config_decls = []   # constexpr config declarations
+    config_decls = []   # config struct declarations (constexpr when frozen-only, static otherwise)
+    runtime_decls = []  # runtime-field metadata tables
     binding_decls = []  # binding array declarations
     array_decls = []    # children array declarations
     node_decls = []     # node declarations
@@ -160,11 +162,33 @@ def generate_tree_cpp(component, output_path: str) -> None:
 
         # Emit config instance if any
         config_ptr = 'nullptr'
+        runtime_ptr = 'nullptr'
+        num_runtime_fields = '0'
         if node['config_cls'] is not None and node['config_instance'] is not None:
             var_name = f'_cfg_{ident}'
             fld_list = get_config_fields(node['config_cls'])
             values = []
+            runtime_fields = []
+            has_runtime = any(fld['runtime'] for fld in fld_list)
             for fld in fld_list:
+                if fld['runtime']:
+                    # Runtime fields are overlaid from JSON at component
+                    # construction; emit a zero/nullptr placeholder here so
+                    # the aggregate initializer stays well-formed.
+                    cv = cpp_value(fld['default'], fld['cpp_type'])
+                    if cv is None:
+                        if fld['cpp_type'] == 'const char *':
+                            cv = 'nullptr'
+                        elif fld['cpp_type'] == 'bool':
+                            cv = 'false'
+                        elif fld['cpp_type'] == 'double':
+                            cv = '0.0'
+                        else:
+                            cv = '0'
+                    values.append(cv)
+                    enum_name = runtime_field_enum(fld['cpp_type'])
+                    runtime_fields.append((fld['name'], enum_name))
+                    continue
                 val = getattr(node['config_instance'], fld['name'], fld['default'])
                 if fld['cpp_type'] == 'int64_t' and isinstance(val, float):
                     val = int(round(val))
@@ -172,9 +196,28 @@ def generate_tree_cpp(component, output_path: str) -> None:
                 if cv is not None:
                     values.append(cv)
             args = ', '.join(values)
+            # A config that carries any runtime field cannot be constexpr:
+            # the engine writes through the struct at construction to apply
+            # the JSON-provided runtime values. Pure-frozen configs stay
+            # constexpr (fastest, read-only image).
+            storage = 'static' if has_runtime else 'static constexpr'
             config_decls.append(
-                f'static constexpr {node["config_cls"].__name__} {var_name}{{{args}}};')
+                f'{storage} {node["config_cls"].__name__} {var_name}{{{args}}};')
             config_ptr = f'&{var_name}'
+
+            if runtime_fields:
+                rt_var = f'_runtime_fields_{ident}'
+                type_name = node['config_cls'].__name__
+                runtime_decls.append(
+                    f'static constexpr vp::RuntimeField {rt_var}[] = {{')
+                for fname, enum_name in runtime_fields:
+                    runtime_decls.append(
+                        f'    {{"{fname}", '
+                        f'(unsigned int)offsetof({type_name}, {fname}), '
+                        f'{enum_name}}},')
+                runtime_decls.append('};')
+                runtime_ptr = rt_var
+                num_runtime_fields = str(len(runtime_fields))
 
         # Emit bindings array if any
         bindings_ptr = 'nullptr'
@@ -206,7 +249,8 @@ def generate_tree_cpp(component, output_path: str) -> None:
         name_str = f'"{node["name"]}"' if node['name'] else '""'
 
         expr = (f'{{{name_str}, {config_ptr}, {children_ptr}, {num_children}, '
-                f'{vp_comp}, {bindings_ptr}, {num_bindings}}}')
+                f'{vp_comp}, {bindings_ptr}, {num_bindings}, '
+                f'{runtime_ptr}, {num_runtime_fields}}}')
 
         # Root node gets its own declaration
         if path == '':
@@ -217,10 +261,15 @@ def generate_tree_cpp(component, output_path: str) -> None:
 
     emit_node(tree)
 
-    # Write everything in order: configs, bindings, children arrays, nodes
+    # Write everything in order: configs, runtime metadata, bindings,
+    # children arrays, nodes
     for decl in config_decls:
         lines.append(decl)
     if config_decls:
+        lines.append('')
+    for decl in runtime_decls:
+        lines.append(decl)
+    if runtime_decls:
         lines.append('')
     for decl in binding_decls:
         lines.append(decl)

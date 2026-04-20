@@ -37,6 +37,9 @@ import os
 import re
 import textwrap
 from dataclasses import fields, is_dataclass, MISSING
+from typing import get_type_hints
+
+from gvrun.runtime import is_runtime_annotation, unwrap_annotated
 
 
 # Fields inherited from Config base class — skip these
@@ -47,13 +50,28 @@ _TYPE_MAP = {
     int:   'int64_t',
     bool:  'bool',
     float: 'double',
+    str:   'const char *',
+}
+
+# Mapping from C++ type to the corresponding vp::RuntimeFieldType enum name.
+_RUNTIME_TYPE_ENUM = {
+    'int64_t':      'vp::RUNTIME_INT64',
+    'bool':         'vp::RUNTIME_BOOL',
+    'double':       'vp::RUNTIME_DOUBLE',
+    'const char *': 'vp::RUNTIME_STRING',
 }
 
 
 def _cpp_type(python_type) -> str | None:
-    """Map a Python type annotation to its C++ equivalent."""
+    """Map a Python type annotation to its C++ equivalent.
+
+    Unwraps ``Annotated[T, ...]`` before mapping so a field typed as
+    ``Annotated[str, Runtime]`` resolves to ``const char *`` the same way
+    a bare ``str`` would.
+    """
+    python_type = unwrap_annotated(python_type)
     if isinstance(python_type, str):
-        mapping = {'int': 'int64_t', 'bool': 'bool', 'float': 'double'}
+        mapping = {'int': 'int64_t', 'bool': 'bool', 'float': 'double', 'str': 'const char *'}
         return mapping.get(python_type)
     return _TYPE_MAP.get(python_type)
 
@@ -68,20 +86,37 @@ def _cpp_default(value, cpp_t: str) -> str:
         if isinstance(value, str):
             return str(int(value.strip().rstrip(','), 0))
         return str(int(value))
+    if cpp_t == 'const char *':
+        if value is None:
+            return 'nullptr'
+        s = str(value).replace('\\', '\\\\').replace('"', '\\"')
+        return f'"{s}"'
     return None
 
 
 def get_config_fields(config_cls):
     """Get the list of packable fields from a Config dataclass.
 
-    Returns a list of dicts with keys: name, cpp_type, default.
+    Returns a list of dicts with keys: name, cpp_type, default, runtime.
+    ``runtime`` is True when the field is typed ``Annotated[T, Runtime]``
+    and should be overlaid from the JSON property wire at simulation
+    start rather than baked at platform compile time.
+
     Used by both header generation and tree generation.
     """
+    # Resolve PEP 563 string annotations so Annotated[T, Runtime] is a
+    # real object (not the string "Annotated[T, Runtime]").
+    try:
+        type_hints = get_type_hints(config_cls, include_extras=True)
+    except Exception:
+        type_hints = {}
+
     result = []
     for f in fields(config_cls):
         if f.name in _SKIP_FIELDS:
             continue
-        cpp_t = _cpp_type(f.type)
+        resolved_type = type_hints.get(f.name, f.type)
+        cpp_t = _cpp_type(resolved_type)
         if cpp_t is None:
             continue
 
@@ -95,8 +130,14 @@ def get_config_fields(config_cls):
             'name': f.name,
             'cpp_type': cpp_t,
             'default': default_val,
+            'runtime': is_runtime_annotation(resolved_type),
         })
     return result
+
+
+def runtime_field_enum(cpp_t: str) -> str | None:
+    """Return the vp::RuntimeFieldType enumerator name for a C++ type."""
+    return _RUNTIME_TYPE_ENUM.get(cpp_t)
 
 
 def cpp_value(value, cpp_t: str) -> str:
