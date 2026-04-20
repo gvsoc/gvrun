@@ -98,6 +98,15 @@ def main(argv: list[str] | None = None) -> int:
     _ = parser.add_argument("--attribute", dest="attributes", default=[],
         action="append", help="specify the value of an attribute")
 
+    _ = parser.add_argument("--flash-content", dest="flash_contents", default=[],
+        action="append",
+        help="replace a flash's content layout from a JSON file: PATH@FLASHNAME")
+
+    _ = parser.add_argument("--flash-property", dest="flash_properties", default=[],
+        action="append",
+        help="override a flash property: VALUE@FLASH:SECTION:KEY "
+             "(appends for list-typed properties, replaces otherwise)")
+
     _ = parser.add_argument('--verbose', dest='verbose', type=str, default='critical', choices=[
         'debug', 'info', 'warning', 'error', 'critical'],
         help='Specifies verbose level.')

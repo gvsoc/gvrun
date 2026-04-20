@@ -47,6 +47,7 @@ commands = [
     ['targets'     , 'Show the list of available targets'],
     ['image'       , 'Generate the target images needed to run execution'],
     ['flash'       , 'Upload the flash contents to the target'],
+    ['flash_layout', 'Dump the layout of all flash memories'],
     ['tree'        , 'Dump the tree of attributes, parameters and parameters'],
     ['run'         , 'Start execution on the target'],
     ['clean'       , 'Remove work directory'],
@@ -69,7 +70,45 @@ def load_config(target: SystemTreeNode|None, args: argparse.Namespace):
             module = import_config('config.py')
             module.declare(target)
 
+        apply_flash_cli_overrides(target, args)
+
         target.configure_all()
+
+
+def apply_flash_cli_overrides(target: SystemTreeNode, args: argparse.Namespace):
+    """Apply ``--flash-content`` and ``--flash-property`` CLI overrides.
+
+    Called from :func:`load_config` after ``config.py`` has declared flashes
+    and any imperative content, so CLI overrides win.
+    """
+    flash_contents = getattr(args, 'flash_contents', None) or []
+    flash_properties = getattr(args, 'flash_properties', None) or []
+
+    for arg in flash_contents:
+        if '@' not in arg:
+            raise RuntimeError(
+                f'Invalid --flash-content argument "{arg}": expected PATH@FLASHNAME')
+        path, flash_name = arg.rsplit('@', 1)
+        target.get_flash(flash_name).set_content(path)
+
+    for arg in flash_properties:
+        if '@' not in arg:
+            raise RuntimeError(
+                f'Invalid --flash-property argument "{arg}": '
+                f'expected VALUE@FLASH:SECTION:KEY')
+        value, locator = arg.rsplit('@', 1)
+        parts = locator.split(':')
+        if len(parts) != 3:
+            raise RuntimeError(
+                f'Invalid --flash-property argument "{arg}": '
+                f'locator "{locator}" must have form FLASH:SECTION:KEY')
+        flash_name, section_name, key = parts
+        target.get_flash(flash_name).set_property(section_name, key, value)
+
+    # Materialise sections so ``after_parse`` side effects (e.g. registering
+    # an app_binary ELF as an executable) happen before ``generate_all``.
+    for flash in target.get_flashes().values():
+        flash.parse_content()
 
 
 def dump_tree(target: Target, args: argparse.Namespace):
@@ -141,6 +180,23 @@ def _find_gvsoc_component(node):
     return None
 
 
+_flash_images_generated = False
+
+def generate_flash_images(target: Target, args: argparse.Namespace):
+    """Generate flash images for all non-empty registered flashes."""
+    global _flash_images_generated
+    if _flash_images_generated:
+        return
+    _flash_images_generated = True
+
+    systree = target.get_systree() or target
+    flashes = systree.get_flashes()
+    workdir = os.path.join(args.work_dir, 'build')
+    for flash in flashes.values():
+        if not flash.is_empty():
+            flash.generate_image(workdir)
+
+
 def __print_available_commands():
     print('Available commands:')
 
@@ -178,6 +234,7 @@ def handle_command(target: Target, command: str, args: argparse.Namespace):
         if comp_generate:
             comp_generate = False
             target.generate_all(os.path.join(args.work_dir, 'build'))
+        generate_flash_images(target, args)
         if command == 'image':
             return
 
@@ -185,12 +242,19 @@ def handle_command(target: Target, command: str, args: argparse.Namespace):
         if comp_generate:
             comp_generate = False
             target.generate_all(os.path.join(args.work_dir, 'build'))
+        generate_flash_images(target, args)
         _ = target.run(args)
         if command == 'run':
             return
 
     if command in ['components', 'flash']:
         _ = target.handle_command(command, args)
+
+    if command == 'flash_layout':
+        systree = target.get_systree() or target
+        for flash in systree.get_flashes().values():
+            level = getattr(args, 'flash_layout_level', 0) or 0
+            flash.dump_layout(level)
 
     if command == 'target_gen':
         target.target_gen_walk(os.path.join(args.work_dir, 'build'))

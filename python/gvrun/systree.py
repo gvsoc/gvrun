@@ -114,6 +114,7 @@ class SystemTreeNode(SystemTreeNodeParameter):
         self.__binary_handlers: list[Callable[[str], None]] = []
         self.__has_tree_content = False
         self.__attributes = None
+        self.__flashes: dict[str, object] = {}
         self.__node_type = 'Component'
         self.__target_name = None
         if config is not None:
@@ -330,6 +331,60 @@ class SystemTreeNode(SystemTreeNodeParameter):
         executable (Executable): Executable to be registered
         """
         self._add_executable(executable)
+
+    def register_flash(self, flash: object):
+        """Register a flash memory.
+
+        Flashes are declared by targets to describe available flash hardware.
+        Tests then add sections to them via ``target.get_flash(name).add_section(...)``.
+
+        Parameters
+        ----------
+        flash : Flash
+            The flash to register.
+        """
+        self.__flashes[flash.name] = flash
+        # Let the flash reach back to the system tree node that owns it — used
+        # by sections like AppBinarySection to register executables.
+        if hasattr(flash, 'owner'):
+            flash.owner = self
+
+    def get_flash(self, name: str) -> object:
+        """Get a registered flash by name.
+
+        Parameters
+        ----------
+        name : str
+            The flash name.
+
+        Returns
+        -------
+        Flash
+            The flash object.
+        """
+        flash = self.__flashes.get(name)
+        if flash is None:
+            # Search in parent
+            if self.__parent is not None:
+                return self.__parent.get_flash(name)
+            raise RuntimeError(f'Flash not found: {name}')
+        return flash
+
+    def get_flashes(self) -> dict:
+        """Get all registered flashes.
+
+        Returns
+        -------
+        dict
+            Dictionary mapping flash names to Flash objects.
+        """
+        flashes = dict(self.__flashes)
+        if self.__parent is not None:
+            parent_flashes = self.__parent.get_flashes()
+            for name, flash in parent_flashes.items():
+                if name not in flashes:
+                    flashes[name] = flash
+        return flashes
 
     def configure_all(self) -> None:
         """Call all configure methods of the tree
