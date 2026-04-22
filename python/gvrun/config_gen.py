@@ -35,15 +35,19 @@ Usage:
 from __future__ import annotations
 import os
 import re
+import sys
 import textwrap
+import typing
 from dataclasses import fields, is_dataclass, MISSING
 from typing import get_type_hints
 
 from gvrun.runtime import is_runtime_annotation, unwrap_annotated
 
 
-# Fields inherited from Config base class — skip these
-_SKIP_FIELDS = {'parent', 'name', 'label', 'path', 'children', 'links', 'defines'}
+# Fields inherited from Config base class — skip these. ``name`` is intentionally
+# kept: it carries the user-visible identifier (e.g. a router mapping name) into
+# the generated C++ struct so models can use it without a side channel.
+_SKIP_FIELDS = {'parent', 'label', 'path', 'children', 'links', 'defines'}
 
 # Python types we can map to C++
 _TYPE_MAP = {
@@ -94,13 +98,43 @@ def _cpp_default(value, cpp_t: str) -> str:
     return None
 
 
+def _resolve_forward_ref(ref, owner_cls):
+    """Resolve a string forward reference against ``owner_cls``'s module."""
+    if not isinstance(ref, str):
+        return ref
+    module = sys.modules.get(getattr(owner_cls, '__module__', None))
+    if module is None:
+        return None
+    return getattr(module, ref, None)
+
+
+def _list_elem_dataclass(resolved_type, owner_cls):
+    """If ``resolved_type`` is ``list[X]`` with X a dataclass, return X. Else None."""
+    origin = typing.get_origin(resolved_type)
+    if origin is not list:
+        return None
+    args = typing.get_args(resolved_type)
+    if len(args) != 1:
+        return None
+    elem = args[0]
+    if isinstance(elem, str):
+        elem = _resolve_forward_ref(elem, owner_cls)
+    if elem is None or not is_dataclass(elem):
+        return None
+    return elem
+
+
 def get_config_fields(config_cls):
     """Get the list of packable fields from a Config dataclass.
 
-    Returns a list of dicts with keys: name, cpp_type, default, runtime.
-    ``runtime`` is True when the field is typed ``Annotated[T, Runtime]``
-    and should be overlaid from the JSON property wire at simulation
-    start rather than baked at platform compile time.
+    Returns a list of dicts. Three flavours of entry are produced:
+
+    * scalar    — ``cpp_type`` is one of int64_t/bool/double/const char *,
+                  with ``default`` and ``runtime`` flags.
+    * list      — ``cpp_type == 'list'`` with ``list_elem_cls`` pointing at
+                  the element dataclass. Generates a (count, pointer) pair
+                  in the C++ struct; the array itself is materialised by
+                  ``tree_gen``.
 
     Used by both header generation and tree generation.
     """
@@ -116,6 +150,18 @@ def get_config_fields(config_cls):
         if f.name in _SKIP_FIELDS:
             continue
         resolved_type = type_hints.get(f.name, f.type)
+
+        elem_cls = _list_elem_dataclass(resolved_type, config_cls)
+        if elem_cls is not None:
+            result.append({
+                'name': f.name,
+                'cpp_type': 'list',
+                'list_elem_cls': elem_cls,
+                'default': None,
+                'runtime': False,
+            })
+            continue
+
         cpp_t = _cpp_type(resolved_type)
         if cpp_t is None:
             continue
@@ -133,6 +179,21 @@ def get_config_fields(config_cls):
             'runtime': is_runtime_annotation(resolved_type),
         })
     return result
+
+
+def _header_include_path(config_cls) -> str:
+    """Return the canonical ``<subdir>/<snake>.hpp`` path for ``config_cls``.
+
+    Mirrors the layout used by ``runner._generate_config_headers``: the first
+    module path component becomes the subdirectory, and the class name is
+    snake-cased to form the file stem.
+    """
+    mod_parts = config_cls.__module__.split('.')
+    subdir = mod_parts[0] if len(mod_parts) >= 2 else ''
+    snake = re.sub(r'(?<!^)(?=[A-Z])', '_', config_cls.__name__).lower()
+    if subdir:
+        return f'{subdir}/{snake}.hpp'
+    return f'{snake}.hpp'
 
 
 def runtime_field_enum(cpp_t: str) -> str | None:
@@ -173,6 +234,12 @@ def generate_cpp_header(config_cls, output_path: str = None) -> str:
     docstring = config_cls.__doc__ or f'Configuration struct for {class_name}.'
     docstring = textwrap.dedent(docstring).strip()
 
+    # Pull in headers for any nested Config types appearing as list elements.
+    nested_includes = []
+    for fld in field_list:
+        if fld['cpp_type'] == 'list':
+            nested_includes.append(_header_include_path(fld['list_elem_cls']))
+
     lines = []
     lines.append('/*')
     lines.append(f' * Auto-generated from {module_name} — do not edit manually.')
@@ -180,7 +247,10 @@ def generate_cpp_header(config_cls, output_path: str = None) -> str:
     lines.append('')
     lines.append('#pragma once')
     lines.append('')
+    lines.append('#include <cstddef>')
     lines.append('#include <cstdint>')
+    for inc in sorted(set(nested_includes)):
+        lines.append(f'#include <{inc}>')
     lines.append('')
 
     # Docblock
@@ -196,7 +266,12 @@ def generate_cpp_header(config_cls, output_path: str = None) -> str:
     # default-constructible so that C++ member initialization doesn't
     # overwrite data written by the base class template constructor.
     for fld in field_list:
-        lines.append(f'    {fld["cpp_type"]} {fld["name"]};')
+        if fld['cpp_type'] == 'list':
+            elem_name = fld['list_elem_cls'].__name__
+            lines.append(f'    size_t {fld["name"]}_count;')
+            lines.append(f'    const {elem_name} *{fld["name"]};')
+        else:
+            lines.append(f'    {fld["cpp_type"]} {fld["name"]};')
 
     lines.append('};')
     lines.append('')

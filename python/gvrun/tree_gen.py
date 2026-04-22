@@ -38,7 +38,13 @@ from dataclasses import fields, is_dataclass
 
 
 # Reuse field helpers from config_gen
-from gvrun.config_gen import get_config_fields, cpp_value, _SKIP_FIELDS, runtime_field_enum
+from gvrun.config_gen import (
+    _SKIP_FIELDS,
+    _header_include_path,
+    cpp_value,
+    get_config_fields,
+    runtime_field_enum,
+)
 
 
 def _path_to_ident(path: str) -> str:
@@ -100,17 +106,21 @@ def _collect_full_tree(component, path=''):
     return node
 
 
+def _add_class_includes(cls, includes: set) -> None:
+    """Add the header for ``cls`` and any nested list-element configs to *includes*."""
+    if cls is None:
+        return
+    includes.add(_header_include_path(cls))
+    for fld in get_config_fields(cls):
+        if fld['cpp_type'] == 'list':
+            _add_class_includes(fld['list_elem_cls'], includes)
+
+
 def _collect_includes(node) -> set:
     """Collect header includes from all config classes in the tree."""
     includes = set()
     if node['config_cls'] is not None:
-        cls = node['config_cls']
-        mod = cls.__module__
-        parts = mod.split('.')
-        if len(parts) >= 2:
-            subdir = parts[0]
-            snake = re.sub(r'(?<!^)(?=[A-Z])', '_', cls.__name__).lower()
-            includes.add(f'{subdir}/{snake}.hpp')
+        _add_class_includes(node['config_cls'], includes)
     for child in node['children'].values():
         includes |= _collect_includes(child)
     return includes
@@ -143,11 +153,62 @@ def generate_tree_cpp(component, output_path: str) -> None:
     lines.append('')
 
     # We collect all declarations bottom-up
+    list_decls = []     # constexpr arrays for list-of-Config fields (emitted before the parent's struct init)
     config_decls = []   # config struct declarations (constexpr when frozen-only, static otherwise)
     runtime_decls = []  # runtime-field metadata tables
     binding_decls = []  # binding array declarations
     array_decls = []    # children array declarations
     node_decls = []     # node declarations
+
+    def _format_aggregate(elem_cls, instance) -> str:
+        """Render a nested Config instance as a brace-enclosed aggregate initializer.
+
+        Mirrors the per-field policy of the top-level emitter: scalar fields
+        produce literals, runtime fields are not allowed inside list elements
+        (the engine only walks runtime tables on the root config), and nested
+        lists recurse into ``_emit_list_array`` to emit a separate constexpr
+        array referenced by pointer.
+        """
+        values = []
+        for fld in get_config_fields(elem_cls):
+            if fld['cpp_type'] == 'list':
+                sub_arr = _emit_list_array(fld['list_elem_cls'],
+                    getattr(instance, fld['name'], []) or [])
+                values.append(str(len(getattr(instance, fld['name'], []) or [])))
+                values.append(sub_arr)
+                continue
+            val = getattr(instance, fld['name'], fld['default'])
+            if fld['cpp_type'] == 'int64_t' and isinstance(val, float):
+                val = int(round(val))
+            cv = cpp_value(val, fld['cpp_type'])
+            if cv is None:
+                # Unknown / unsupported value — fall back to a zero-style literal.
+                if fld['cpp_type'] == 'const char *':
+                    cv = 'nullptr'
+                elif fld['cpp_type'] == 'bool':
+                    cv = 'false'
+                elif fld['cpp_type'] == 'double':
+                    cv = '0.0'
+                else:
+                    cv = '0'
+            values.append(cv)
+        return '{' + ', '.join(values) + '}'
+
+    _list_counter = [0]
+
+    def _emit_list_array(elem_cls, items) -> str:
+        """Emit a static constexpr array of ``elem_cls`` and return its identifier."""
+        if not items:
+            return 'nullptr'
+        idx = _list_counter[0]
+        _list_counter[0] += 1
+        arr_var = f'_list_{idx}'
+        elem_name = elem_cls.__name__
+        list_decls.append(f'static constexpr {elem_name} {arr_var}[] = {{')
+        for item in items:
+            list_decls.append(f'    {_format_aggregate(elem_cls, item)},')
+        list_decls.append('};')
+        return arr_var
 
     def emit_node(node, path=''):
         """Process a node bottom-up. Returns an inline initializer expression."""
@@ -171,6 +232,12 @@ def generate_tree_cpp(component, output_path: str) -> None:
             runtime_fields = []
             has_runtime = any(fld['runtime'] for fld in fld_list)
             for fld in fld_list:
+                if fld['cpp_type'] == 'list':
+                    items = getattr(node['config_instance'], fld['name'], []) or []
+                    arr_expr = _emit_list_array(fld['list_elem_cls'], items)
+                    values.append(str(len(items)))
+                    values.append(arr_expr)
+                    continue
                 if fld['runtime']:
                     # Runtime fields are overlaid from JSON at component
                     # construction; emit a zero/nullptr placeholder here so
@@ -261,8 +328,13 @@ def generate_tree_cpp(component, output_path: str) -> None:
 
     emit_node(tree)
 
-    # Write everything in order: configs, runtime metadata, bindings,
-    # children arrays, nodes
+    # Write everything in order: list-of-Config arrays (must precede the
+    # config_decls that reference them by name), configs, runtime metadata,
+    # bindings, children arrays, nodes.
+    for decl in list_decls:
+        lines.append(decl)
+    if list_decls:
+        lines.append('')
     for decl in config_decls:
         lines.append(decl)
     if config_decls:
