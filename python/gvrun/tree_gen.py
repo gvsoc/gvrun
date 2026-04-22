@@ -32,6 +32,7 @@ Called during cmake configure time by the gapy 'components' command.
 """
 
 from __future__ import annotations
+import hashlib
 import os
 import re
 from dataclasses import fields, is_dataclass
@@ -126,16 +127,13 @@ def _collect_includes(node) -> set:
     return includes
 
 
-def generate_tree_cpp(component, output_path: str) -> None:
-    """
-    Generate a C++ file with the compiled component tree.
+def _render_tree_cpp(component) -> str:
+    """Render the per-target tree.cpp content from a Python component tree.
 
-    Parameters
-    ----------
-    component : Component
-        The root Python component (with .components, .bindings, .properties, etc.)
-    output_path : str
-        Path to write the generated .cpp file.
+    Returns the file contents as a string. ``generate_tree_cpp`` writes it
+    to disk; ``compute_signature`` hashes it for the runtime mismatch
+    check (e.g. when ``--attribute`` reshapes the systree between build
+    and run).
     """
     tree = _collect_full_tree(component)
 
@@ -361,8 +359,41 @@ def generate_tree_cpp(component, output_path: str) -> None:
     lines.append('}')
     lines.append('')
 
-    content = '\n'.join(lines)
+    return '\n'.join(lines)
+
+
+def compute_signature(component) -> str:
+    """SHA256 hex digest of the tree.cpp that would be written for ``component``.
+
+    Used by the launcher at run time to decide whether the installed
+    ``libplatform_tree_<target>.so`` (built against the default systree)
+    still matches the live systree (which may have been reshaped by
+    ``--attribute`` etc.). When the signature mismatches, the launcher
+    skips ``platform_tree`` so the engine falls back to the JSON path
+    instead of dlopen'ing a stale .so.
+    """
+    return hashlib.sha256(_render_tree_cpp(component).encode()).hexdigest()
+
+
+def generate_tree_cpp(component, output_path: str) -> None:
+    """Generate a C++ file with the compiled component tree.
+
+    Also writes a ``<output_path>.sig`` sidecar containing the SHA256 of
+    the tree.cpp content. The CMake install step copies that sidecar
+    next to the compiled ``.so`` so the runtime can detect a stale
+    ``.so`` (e.g. when ``--attribute`` changes the systree shape).
+
+    Parameters
+    ----------
+    component : Component
+        The root Python component (with .components, .bindings, .properties, etc.)
+    output_path : str
+        Path to write the generated .cpp file.
+    """
+    content = _render_tree_cpp(component)
     os.makedirs(os.path.dirname(output_path) or '.', exist_ok=True)
     with open(output_path, 'w') as fp:
         fp.write(content)
+    with open(output_path + '.sig', 'w') as fp:
+        fp.write(hashlib.sha256(content.encode()).hexdigest())
     print(f'Generated {output_path}')
