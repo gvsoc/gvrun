@@ -195,16 +195,26 @@ def _render_tree_cpp(component) -> str:
     _list_counter = [0]
 
     def _emit_list_array(elem_cls, items) -> str:
-        """Emit a static constexpr array of ``elem_cls`` and return its identifier."""
+        """Emit a static constexpr array of ``elem_cls`` and return its identifier.
+
+        Bottom-up: each item's aggregate string is rendered first, so any
+        nested ``_list_N[]`` arrays they contain are appended to
+        ``list_decls`` *before* this array's own declaration. Otherwise
+        the inner declarations would land inside the outer array's brace
+        block and the C++ would not parse.
+        """
         if not items:
             return 'nullptr'
+        # Render every aggregate first — this drains nested decls into
+        # list_decls in dependency order.
+        aggregates = [_format_aggregate(elem_cls, item) for item in items]
         idx = _list_counter[0]
         _list_counter[0] += 1
         arr_var = f'_list_{idx}'
         elem_name = elem_cls.__name__
         list_decls.append(f'static constexpr {elem_name} {arr_var}[] = {{')
-        for item in items:
-            list_decls.append(f'    {_format_aggregate(elem_cls, item)},')
+        for agg in aggregates:
+            list_decls.append(f'    {agg},')
         list_decls.append('};')
         return arr_var
 
