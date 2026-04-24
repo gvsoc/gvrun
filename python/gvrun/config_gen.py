@@ -42,6 +42,7 @@ from dataclasses import fields, is_dataclass, MISSING
 from typing import get_type_hints
 
 from gvrun.runtime import is_runtime_annotation, unwrap_annotated
+from gvrun.utils import write_if_changed
 
 
 # Fields inherited from Config base class — skip these. ``name`` is intentionally
@@ -279,9 +280,9 @@ def generate_cpp_header(config_cls, output_path: str = None) -> str:
     content = '\n'.join(lines)
 
     if output_path:
-        os.makedirs(os.path.dirname(output_path) or '.', exist_ok=True)
-        with open(output_path, 'w') as fp:
-            fp.write(content)
-        print(f'Generated {output_path}')
+        if write_if_changed(output_path, content):
+            print(f'Generated {output_path}')
+        else:
+            print(f'Up to date {output_path}')
 
     return content

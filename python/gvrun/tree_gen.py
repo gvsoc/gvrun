@@ -46,6 +46,7 @@ from gvrun.config_gen import (
     get_config_fields,
     runtime_field_enum,
 )
+from gvrun.utils import write_if_changed
 
 
 def _path_to_ident(path: str) -> str:
@@ -401,9 +402,10 @@ def generate_tree_cpp(component, output_path: str) -> None:
         Path to write the generated .cpp file.
     """
     content = _render_tree_cpp(component)
-    os.makedirs(os.path.dirname(output_path) or '.', exist_ok=True)
-    with open(output_path, 'w') as fp:
-        fp.write(content)
-    with open(output_path + '.sig', 'w') as fp:
-        fp.write(hashlib.sha256(content.encode()).hexdigest())
-    print(f'Generated {output_path}')
+    signature = hashlib.sha256(content.encode()).hexdigest()
+    written = write_if_changed(output_path, content)
+    write_if_changed(output_path + '.sig', signature)
+    if written:
+        print(f'Generated {output_path}')
+    else:
+        print(f'Up to date {output_path}')

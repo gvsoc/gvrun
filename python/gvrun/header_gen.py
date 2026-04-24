@@ -41,6 +41,8 @@ from typing import Any
 
 from config_tree import Config
 
+from gvrun.utils import write_if_changed
+
 
 # Fields inherited from the Config base class — never emitted as defines.
 _BASE_FIELD_NAMES = frozenset({
@@ -230,9 +232,7 @@ def generate_header(
     lines.append(f"#endif /* {guard} */")
     lines.append("")
 
-    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-    with open(path, "w") as fh:
-        fh.write("\n".join(lines))
+    write_if_changed(os.path.abspath(path), "\n".join(lines))
 
 
 # ---------------------------------------------------------------------------
@@ -351,11 +351,7 @@ def _generate_header_tree(
     content = "\n".join(lines)
 
     file_path = os.path.join(outdir, my_rel_path)
-    file_dir = os.path.dirname(file_path)
-    if file_dir:
-        os.makedirs(file_dir, exist_ok=True)
-    with open(file_path, "w") as fh:
-        fh.write(content)
+    write_if_changed(file_path, content)
 
 
 def generate_headers(

@@ -22,9 +22,32 @@
 
 
 from collections import OrderedDict
+import os
 import struct
 from prettytable import PrettyTable
 from typing import Any
+
+
+def write_if_changed(path: str, content: str) -> bool:
+    """Write ``content`` to ``path`` only if it differs from the existing file.
+
+    Keeping mtime stable when the generated content is identical avoids
+    spurious recompilations of targets that depend on the file.
+
+    Returns True if the file was written, False if it was left untouched.
+    """
+    parent = os.path.dirname(path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    try:
+        with open(path, 'r') as fp:
+            if fp.read() == content:
+                return False
+    except FileNotFoundError:
+        pass
+    with open(path, 'w') as fp:
+        fp.write(content)
+    return True
 
 def compute_crc(init : int, buff: bytes):
     """
