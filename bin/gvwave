@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+#
+# gvwave — short wrapper around `gvrun` for opening waveform files in the
+# GVSoC GUI. Picks the right dumper target from the file extension:
+#
+#     .fst   → utils.fst_dumper   (parameter fst_file=<path>)
+#     .fsdb  → utils.fsdb_dumper  (parameter fsdb_file=<path>)
+#
+# Usage:
+#     gvwave <file.fst|file.fsdb> [--layout FILE] [extra gvrun args...]
+#
+# Any unrecognised argument is forwarded verbatim to gvrun, so all of
+# gvrun's flags (--attribute, --parameter, --jobs, …) keep working.
+
+set -e
+
+if [ $# -lt 1 ]; then
+    echo "usage: gvwave <file.fst|file.fsdb> [--layout FILE] [extra gvrun args...]" >&2
+    exit 1
+fi
+
+file=$1
+shift
+
+case "$file" in
+    *.fst)
+        target=utils.fst_dumper
+        param=fst_file
+        ;;
+    *.fsdb)
+        target=utils.fsdb_dumper
+        param=fsdb_file
+        ;;
+    -*|"")
+        echo "gvwave: first argument must be the waveform file path" >&2
+        exit 2
+        ;;
+    *)
+        echo "gvwave: unsupported extension (need .fst or .fsdb): $file" >&2
+        exit 2
+        ;;
+esac
+
+# Translate --layout / --layout=FILE into gvrun's --parameter=layout=FILE.
+# Anything else is passed through unchanged.
+passthrough=()
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --layout=*)
+            passthrough+=("--parameter=layout=${1#--layout=}")
+            shift
+            ;;
+        --layout)
+            if [ $# -lt 2 ]; then
+                echo "gvwave: --layout requires a file argument" >&2
+                exit 2
+            fi
+            passthrough+=("--parameter=layout=$2")
+            shift 2
+            ;;
+        *)
+            passthrough+=("$1")
+            shift
+            ;;
+    esac
+done
+
+# Prefer the gvrun sitting right next to us so gvwave works straight out
+# of an installed bin/ dir without relying on PATH ordering.
+if [ -n "${ZSH_VERSION:-}" ]; then
+    SCRIPT_PATH="$(readlink -f -- "${(%):-%x}")"
+else
+    SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
+fi
+SCRIPT_DIR="$(dirname "$SCRIPT_PATH")"
+GVRUN="$SCRIPT_DIR/gvrun"
+if [ ! -x "$GVRUN" ]; then
+    GVRUN=gvrun
+fi
+
+exec "$GVRUN" \
+    --target="$target" \
+    --parameter="$param=$file" \
+    --gui \
+    "${passthrough[@]}" \
+    run
