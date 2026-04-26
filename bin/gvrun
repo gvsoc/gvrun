@@ -39,7 +39,7 @@ if [ -z "$GVRUN_MODEL_PATH" ]; then
 fi
 
 if [ -x "$VENV_GVRUN" ]; then
-        exec "$VENV_GVRUN" --platform=gvsoc --target-dir="$INSTALL_DIR/targets" --target-dir="$INSTALL_DIR/generators" --model-dir="$GVRUN_MODEL_PATH" "$@"
+        exec "$VENV_GVRUN" --target-dir="$INSTALL_DIR/targets" --target-dir="$INSTALL_DIR/generators" --model-dir="$GVRUN_MODEL_PATH" "$@"
 fi
 
-exec python3 -m gvrun --platform=gvsoc --target-dir="$INSTALL_DIR/targets" --target-dir="$INSTALL_DIR/generators" --model-dir="$GVRUN_MODEL_PATH" "$@"
+exec python3 -m gvrun --target-dir="$INSTALL_DIR/targets" --target-dir="$INSTALL_DIR/generators" --model-dir="$GVRUN_MODEL_PATH" "$@"

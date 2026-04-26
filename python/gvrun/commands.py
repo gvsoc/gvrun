@@ -406,6 +406,8 @@ def handle_commands(target: Target, args: argparse.Namespace):
 
     commands = args.command
 
+    target._set_active_args(args)
+
     load_config(target.get_systree(), args)
 
     for command in commands:

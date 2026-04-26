@@ -22,6 +22,7 @@ import argparse
 import importlib
 import inspect
 from gvrun.systree import SystemTreeNode
+from gvrun.runner import Runner
 
 
 def get_target(target: str) -> 'type[Target]':
@@ -78,7 +79,31 @@ class Target(SystemTreeNode):
         super().__init__(name)
         self.__parser = parser
         self.__runner_flags: list[str] = []
+        self.__runners: dict[str, Runner] = {}
+        self.__active_args: argparse.Namespace | None = None
         self._set_node_type('Target')
+
+    def register_runner(self, platform: str, runner: Runner) -> None:
+        """Bind a platform-specific Runner to this target.
+
+        When gvrun invokes the target's run/handle_command/generate_all
+        with args.platform == platform, the call is forwarded to runner.
+        """
+        self.__runners[platform] = runner
+
+    def _set_active_args(self, args: argparse.Namespace) -> None:
+        """Stash the parsed args so generate_all (which has no args param) can route."""
+        self.__active_args = args
+
+    def _get_runner(self, args: argparse.Namespace | None = None) -> Runner | None:
+        if args is None:
+            args = self.__active_args
+        if args is None:
+            return None
+        platform = getattr(args, 'platform', None)
+        if platform is None:
+            return None
+        return self.__runners.get(platform)
 
     def process_and_dump_tree(self, inc_arch: bool, inc_build: bool, inc_target: bool,
         inc_attr: bool, inc_prop: bool):
@@ -97,17 +122,22 @@ class Target(SystemTreeNode):
 
     def handle_command(self, command: str, args: argparse.Namespace):
         """Reserved for internal usage"""
-        _ = command
-        _ = args
+        runner = self._get_runner(args)
+        if runner is not None:
+            return runner.handle_command(command, args)
         return False
 
     def generate_all(self, path: str):
         """Reserved for internal usage"""
-        _ = path
+        runner = self._get_runner()
+        if runner is not None:
+            runner.generate_all(path)
 
     def run(self, args: argparse.Namespace) -> int:
         """Reserved for internal usage"""
-        _ = args
+        runner = self._get_runner(args)
+        if runner is not None:
+            return runner.run(args)
         return 0
 
     def get_systree(self) -> SystemTreeNode | None:

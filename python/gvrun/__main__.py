@@ -145,6 +145,11 @@ def main(argv: list[str] | None = None) -> int:
         choices=['fpga', 'board', 'rtl', 'gvsoc'],
         type=str, help="specify the platform used for the target")
 
+    _ = parser.add_argument("--rtl-simulator", dest="rtl_simulator",
+        default=os.environ.get('GVRUN_RTL_SIMULATOR'),
+        type=str,
+        help="select the RTL simulator backend (e.g. verilator, vcs); only meaningful with --platform rtl")
+
     [args, _] = parser.parse_known_args(argv)
 
     if len(args.target_dirs) == 0:
