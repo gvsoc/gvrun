@@ -119,7 +119,14 @@ def _add_class_includes(cls, includes: set) -> None:
 
 
 def _collect_includes(node) -> set:
-    """Collect header includes from all config classes in the tree."""
+    """Collect header includes from all config classes in the tree.
+
+    Matches the layout written by _generate_platform_tree in
+    gvsoc.runner_gvrun2: dotted module names ``pkg.sub.module`` map the
+    header into ``pkg/snake.hpp``; a single-component module (e.g. a target
+    file imported by name only) drops the header at the top of the build
+    dir as ``snake.hpp``.
+    """
     includes = set()
     if node['config_cls'] is not None:
         _add_class_includes(node['config_cls'], includes)

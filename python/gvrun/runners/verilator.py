@@ -41,7 +41,10 @@ class VerilatorRunner(Runner):
                  simulator: str,
                  objcopy: str | None = None,
                  firmware_arg: str = '+firmware',
-                 extra_args: list[str] | None = None):
+                 extra_args: list[str] | None = None,
+                 gui: bool = False,
+                 trace_path: str | None = None,
+                 viewer: str = 'gvwave'):
         super().__init__()
         self.target = target
         self.simulator = simulator
@@ -49,6 +52,9 @@ class VerilatorRunner(Runner):
             'RISCV32_GCC_TOOLCHAIN', '') + '/bin/riscv32-unknown-elf-objcopy'
         self.firmware_arg = firmware_arg
         self.extra_args = list(extra_args) if extra_args else []
+        self.gui = gui
+        self.trace_path = trace_path
+        self.viewer = viewer
         self.__firmwares: list[str] = []
 
     def _hex_path(self, elf_path: str) -> str:
@@ -109,8 +115,32 @@ class VerilatorRunner(Runner):
         cmd += self.extra_args
         cmd += self.target.get_runner_flags()
 
+        # GUI mode: force tracing to a known path so we can hand it to the
+        # viewer once the sim is done. Don't override an explicit +trace= the
+        # caller already provided.
+        trace_path = None
+        if self.gui:
+            already_set = any(a.startswith('+trace') for a in cmd)
+            if not already_set:
+                trace_path = self.trace_path or os.path.join(
+                    getattr(args, 'work_dir', None) or os.getcwd(), 'sim.fst')
+                cmd.append(f'+trace={trace_path}')
+
         if getattr(args, 'verbose', None) == 'debug':
             print(' '.join(cmd), flush=True)
 
         proc = subprocess.run(cmd)
-        return proc.returncode
+        if proc.returncode != 0:
+            return proc.returncode
+
+        if self.gui and trace_path is not None:
+            if not os.path.exists(trace_path):
+                raise RuntimeError(
+                    f'VerilatorRunner: --gui requested but trace file was not '
+                    f'produced at {trace_path}')
+            print(f'[gvrun] opening trace in {self.viewer}: {trace_path}',
+                  flush=True)
+            view = subprocess.run([self.viewer, trace_path])
+            return view.returncode
+
+        return 0
