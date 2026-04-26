@@ -150,6 +150,11 @@ def main(argv: list[str] | None = None) -> int:
         type=str,
         help="select the RTL simulator backend (e.g. verilator, vcs); only meaningful with --platform rtl")
 
+    _ = parser.add_argument("--no-config-py", dest="no_config_py",
+        action="store_true", default=False,
+        help="Do not load config.py from the working directory (useful when "
+             "the target is a viewer/utility like utils.fst_dumper)")
+
     [args, _] = parser.parse_known_args(argv)
 
     if len(args.target_dirs) == 0:

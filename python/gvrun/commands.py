@@ -68,7 +68,7 @@ def load_config(target: SystemTreeNode|None, args: argparse.Namespace):
         _ = BuildParameter(target, 'platform', args.platform, 'Platform providing the target')
         _ = BuildParameter(target, 'builddir', os.path.join(args.work_dir, 'build'), 'Build directory')
 
-        if os.path.exists('config.py'):
+        if not getattr(args, 'no_config_py', False) and os.path.exists('config.py'):
             module = import_config('config.py')
             module.declare(target)
 

@@ -82,5 +82,6 @@ exec "$GVRUN" \
     --target="$target" \
     --parameter="$param=$file" \
     --gui \
+    --no-config-py \
     "${passthrough[@]}" \
     run
