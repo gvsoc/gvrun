@@ -183,17 +183,18 @@ def get_config_fields(config_cls):
 
 
 def _header_include_path(config_cls) -> str:
-    """Return the canonical ``<subdir>/<snake>.hpp`` path for ``config_cls``.
+    """Return the canonical ``<module-path>/<snake>.hpp`` path for ``config_cls``.
 
-    Mirrors the layout used by ``runner._generate_config_headers``: the first
-    module path component becomes the subdirectory, and the class name is
-    snake-cased to form the file stem.
+    The full Python module dotted path becomes the directory layout (so that
+    two Config classes with the same ``__name__`` declared in different
+    modules — e.g. an old and a new revision of the same model — get
+    distinct headers and don't overwrite each other). Mirrors the layout
+    used by ``_generate_platform_tree``.
     """
     mod_parts = config_cls.__module__.split('.')
-    subdir = mod_parts[0] if len(mod_parts) >= 2 else ''
     snake = re.sub(r'(?<!^)(?=[A-Z])', '_', config_cls.__name__).lower()
-    if subdir:
-        return f'{subdir}/{snake}.hpp'
+    if len(mod_parts) >= 1 and mod_parts[0]:
+        return f'{"/".join(mod_parts)}/{snake}.hpp'
     return f'{snake}.hpp'
 
 
