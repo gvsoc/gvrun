@@ -362,6 +362,13 @@ class SystemTreeNode(SystemTreeNodeParameter):
         # by sections like AppBinarySection to register executables.
         if hasattr(flash, 'owner'):
             flash.owner = self
+        # Derive a path-based on-disk image filename so two flashes that share
+        # the same logical ``name`` (e.g. each chip's on-chip MRAM in a
+        # multi-chip board) don't write to the same ``<workdir>/<name>.bin``.
+        # Tests still address the flash by ``flash.name`` via ``get_flash``.
+        if hasattr(flash, 'image_name') and flash.image_name is None:
+            path = self.get_path().replace('/', '_')
+            flash.image_name = f'{path}_{flash.name}' if path else flash.name
 
     def get_flash(self, name: str) -> object:
         """Get a registered flash by name.

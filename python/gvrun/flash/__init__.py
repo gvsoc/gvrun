@@ -341,6 +341,11 @@ class Flash:
         # ``app_binary`` section registering an ``ExecutableContainer``) use
         # this.
         self.owner = None
+        # On-disk image filename stem. Defaults to ``name`` but is overridden
+        # by ``SystemTreeNode.register_flash`` with a path-derived value so
+        # multiple flashes that share the same logical ``name`` (e.g. each
+        # chip's on-chip MRAM) don't collide on the same ``<workdir>/<x>.bin``.
+        self.image_name: str | None = None
 
         if default_content_path is not None:
             self._load_content(default_content_path)
@@ -362,6 +367,10 @@ class Flash:
 
     def get_name(self) -> str:
         return self.name
+
+    def get_image_basename(self) -> str:
+        """Return the on-disk filename (no workdir) for the generated image."""
+        return (self.image_name or self.name) + '.bin'
 
     def get_size(self) -> int:
         return self.size
@@ -525,7 +534,7 @@ class Flash:
         # Phase 3: write binary
         image = self._pack()
         os.makedirs(workdir, exist_ok=True)
-        image_path = os.path.join(workdir, self.name + '.bin')
+        image_path = os.path.join(workdir, self.get_image_basename())
         with open(image_path, 'wb') as f:
             f.write(image)
 
@@ -546,7 +555,7 @@ class Flash:
         """Return the path of the generated image file."""
         if self.workdir is None:
             return None
-        return os.path.join(self.workdir, self.name + '.bin')
+        return os.path.join(self.workdir, self.get_image_basename())
 
     def dump_layout(self, level: int = 0):
         """Print the flash layout as a table."""

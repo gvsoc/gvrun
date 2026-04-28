@@ -299,10 +299,9 @@ def generate_flash_images(target: Target, args: argparse.Namespace):
 
     systree = target.get_systree() or target
     flashes = systree.get_flashes()
-    workdir = os.path.join(args.work_dir, 'build')
     for flash in flashes.values():
         if not flash.is_empty():
-            flash.generate_image(workdir)
+            flash.generate_image(args.work_dir)
 
 
 def __print_available_commands():
