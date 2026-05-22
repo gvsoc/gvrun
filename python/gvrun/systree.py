@@ -33,7 +33,8 @@ except ImportError:
 from config_tree import Config
 from typing_extensions import Any, Callable
 from gvrun.builder import Builder
-from gvrun.parameter import Parameter, get_parameter_arg_value, SystemTreeNodeParameter
+from gvrun.parameter import (Parameter, get_parameter_arg_value, set_parameters_from_node,
+    SystemTreeNodeParameter)
 
 __attribute_arg_values: dict[str, str] = {}
 __consumed_paths: set[str] = set()
@@ -212,13 +213,18 @@ class SystemTreeNode(SystemTreeNodeParameter):
     def set_parameter(self, name: str, value: str | int | bool | float) -> None:
         """Set parameter value.
 
-        Parameters are declared when building the system tree. They can be assigned default values
-        which can be overwritten by the command line.
-        This method can be called to overwrites the value of a parameter. This will overwrite
-        both the default value and the command-line value.
+        Equivalent of ``--parameter name=value`` on the command line: the override is
+        stored in the node-parameter registry and consulted lazily when the matching
+        parameter is declared, so the call is order-independent — it works whether the
+        ``*Parameter()`` declaration runs before or after this call (e.g. from a
+        component reached through ``configure_all()``).
+
+        Priority: a CLI ``--parameter`` for the same name still wins, matching the
+        existing CLI > node > default order in :func:`gvrun.parameter.get_parameter_arg_value`.
+
         The name is relative to this node and allow reaching parameters of its child hierarchy.
         In this case, childs are separated by '/' like in this example: child1/child2/property_name.
-        The name can starts with '/' to get the property from the top like in this example:
+        The name can starts with '/' to set the parameter from the top like in this example:
         /top_comp/child1/property_value.
 
         Parameters
@@ -226,7 +232,28 @@ class SystemTreeNode(SystemTreeNodeParameter):
         name (str): The parameter name.
         value (Any): The parameter value.
         """
-        self.__set_parameter(name, value)
+        # Compute the full hierarchical name used as the key in the global override
+        # registries (matches Parameter.full_name built in parameter.py).
+        if name.startswith('/'):
+            full_name = name[1:]
+        else:
+            path = self.get_path()
+            full_name = f'{path}/{name}' if path else name
+
+        # Push into the node-parameter registry so any later declare_parameter() picks
+        # it up via get_parameter_arg_value().
+        set_parameters_from_node([(full_name, value)])
+
+        # If the parameter is already declared, re-resolve via the same CLI-first
+        # lookup that declare_parameter() uses, so CLI --parameter continues to win
+        # regardless of declaration order.
+        if name.startswith('/'):
+            desc = self.__get_top_parameter(name[1:])
+        else:
+            desc = self.__get_parameter(name, check=False)
+        if desc is not None:
+            resolved = get_parameter_arg_value(desc.full_name)
+            self.__set_parameter(name, resolved)
 
     def set_attributes(self, attributes: Config):
         """Set the attributes of this node.
