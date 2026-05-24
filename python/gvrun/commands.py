@@ -304,11 +304,18 @@ def generate_flash_images(target: Target, args: argparse.Namespace):
             flash.generate_image(args.work_dir)
 
 
-def __print_available_commands():
+def __print_available_commands(target: Target):
     print('Available commands:')
 
     for command in commands:
         print(f'  {command[0]:16s} {command[1]}')
+
+    systree = target.get_systree() or target
+    user_cmds = systree.get_registered_commands()
+    if user_cmds:
+        print('\nUser-registered commands:')
+        for name, (_, desc) in user_cmds.items():
+            print(f'  {name:16s} {desc}')
 
 def handle_command(target: Target, command: str, args: argparse.Namespace):
     global comp_generate
@@ -316,8 +323,15 @@ def handle_command(target: Target, command: str, args: argparse.Namespace):
     if target.handle_command(command, args):
         return
 
+    systree = target.get_systree() or target
+    rc = systree.dispatch_registered_command(command, args)
+    if rc is not False:
+        if rc:
+            sys.exit(rc)
+        return
+
     if command == 'commands':
-        __print_available_commands()
+        __print_available_commands(target)
         return
 
     if command == 'config':

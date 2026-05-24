@@ -20,6 +20,7 @@
 
 from dataclasses import fields, is_dataclass
 
+import argparse
 import logging
 import abc
 import rich.table
@@ -127,6 +128,7 @@ class SystemTreeNode(SystemTreeNodeParameter):
         self.__executables: list[Executable] = []
         self.__parent = parent
         self.__binary_handlers: list[Callable[[str], None]] = []
+        self.__commands: dict[str, tuple[Callable[["SystemTreeNode", argparse.Namespace], "int | None"], str]] = {}
         self.__has_tree_content = False
         self.__attributes = None
         self.__flashes: dict[str, object] = {}
@@ -309,6 +311,68 @@ class SystemTreeNode(SystemTreeNodeParameter):
         handler (Callable[[str]]): The callback to be called when an executable is registered
         """
         self.__binary_handlers.append(handler)
+
+    def register_command(self, name: str,
+                         handler: Callable[["SystemTreeNode", argparse.Namespace], "int | None"],
+                         description: str = "") -> None:
+        """Register a user-defined top-level gvrun command.
+
+        Intended to be called from a ``config.py``'s ``declare(target)``
+        function. The command name becomes invocable on the CLI as
+        ``gvrun --target <t> <name>``. The handler runs sequentially on
+        the main thread when the command is dispatched. Returning ``None``
+        or ``0`` is treated as success; any other integer is propagated as
+        the process exit code.
+
+        Collisions with a gvrun built-in name and duplicate registrations
+        are rejected with a ``RuntimeError`` at registration time.
+        """
+        if not callable(handler):
+            raise RuntimeError(
+                f"register_command: handler for '{name}' is not callable")
+
+        # Lazy import to avoid the circular dependency
+        # (gvrun.commands imports SystemTreeNode).
+        from gvrun.commands import commands as _builtin_commands
+        if name in {c[0] for c in _builtin_commands}:
+            raise RuntimeError(
+                f"Cannot register command '{name}': "
+                "name reserved by a gvrun built-in")
+
+        if name in self.__commands:
+            raise RuntimeError(f"Command '{name}' is already registered")
+
+        self.__commands[name] = (handler, description)
+
+    def get_registered_commands(self) -> "dict[str, tuple[Callable, str]]":
+        """Return a snapshot of user-registered commands (name -> (handler, description))."""
+        return dict(self.__commands)
+
+    def dispatch_registered_command(self, name: str, args: argparse.Namespace):
+        """Run a user-registered command if ``name`` matches.
+
+        Returns ``False`` if no command is registered under ``name`` (so
+        the caller can fall through to the built-in dispatch). Otherwise
+        returns the handler's int exit code with ``None`` normalised to
+        ``0``. A bool return from the handler is rejected to avoid
+        clashing with the sentinel.
+        """
+        entry = self.__commands.get(name)
+        if entry is None:
+            return False
+        handler, _ = entry
+        rc = handler(self, args)
+        if isinstance(rc, bool):
+            raise RuntimeError(
+                f"Registered command '{name}' returned a bool ({rc}); "
+                "return None or an integer exit code instead.")
+        if rc is None:
+            return 0
+        if not isinstance(rc, int):
+            raise RuntimeError(
+                f"Registered command '{name}' returned "
+                f"{type(rc).__name__}; expected None or an integer exit code.")
+        return rc
 
     def get_name(self) -> str | None:
         """Get the name of this node
