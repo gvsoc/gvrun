@@ -36,6 +36,7 @@ except ImportError:
 import gvrun.systree
 import gvrun.config
 import gvrun.attribute
+import gvrun.timing
 from gvrun.attribute import set_attributes
 from gvrun.parameter import set_parameters, BuildParameter
 from gvrun.builder import Builder, CommandInterface
@@ -67,6 +68,10 @@ def load_config(target: SystemTreeNode|None, args: argparse.Namespace):
     if target is not None:
         _ = BuildParameter(target, 'platform', args.platform, 'Platform providing the target')
         _ = BuildParameter(target, 'builddir', os.path.join(args.work_dir, 'build'), 'Build directory')
+        _ = BuildParameter(target, 'timing', gvrun.timing.get_global_level(),
+            'Default timing-accuracy level applied to all models '
+            '(set it inside the target string, e.g. "name:timing=functional")',
+            allowed_values=list(gvrun.timing.LEVELS))
 
         if not getattr(args, 'no_config_py', False) and os.path.exists('config.py'):
             module = import_config('config.py')
@@ -177,6 +182,16 @@ def check_overrides_consumed():
             "Unknown attr./--attribute override(s): "
             + ", ".join(hints)
             + ". No matching component attribute in the target's tree.")
+
+    # --- timing(...) — subtree timing levels ------------------------------
+    unknown_timing = sorted(
+        gvrun.timing.get_subtree_level_keys() - gvrun.timing.get_consumed_subtree_paths())
+    if unknown_timing:
+        raise RuntimeError(
+            "Unused timing. override(s): "
+            + ", ".join(f"'{k}'" for k in unknown_timing)
+            + ". The path must name a component whose subtree contains at "
+            "least one model resolving its timing level.")
 
 
 # Set by load_config so check_overrides_consumed can walk the systree.

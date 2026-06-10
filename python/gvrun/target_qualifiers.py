@@ -30,6 +30,8 @@ Available qualifiers:
     config  — Override fields on the target's top ``config_tree.Config``.
     attr    — Override per-component attributes (Config-backed or legacy
               ``Value``/``Tree``).
+    timing  — Override the timing-accuracy level of a component subtree,
+              e.g. ``target:timing.chip/cluster=cycle``.
 """
 
 import argparse
@@ -146,6 +148,17 @@ def _apply_attr_qualifier(values: list[str], args: argparse.Namespace):
     gvrun.attribute.set_attributes(values)
 
 
+def _apply_timing_qualifier(values: list[str], args: argparse.Namespace):
+    """Override the timing-accuracy level of a component subtree.
+
+    Each value is ``<component/path>=<level>`` where the level is one of
+    ``gvrun.timing.LEVELS``; it applies to that node and everything below
+    it. Consumed lazily when a model under the subtree resolves its level.
+    """
+    import gvrun.timing
+    gvrun.timing.set_subtree_levels(values)
+
+
 def _apply_bare_qualifier(values: list[str], args: argparse.Namespace):
     """Route bare ``key=value`` entries to ``--parameter``.
 
@@ -159,6 +172,7 @@ def _apply_bare_qualifier(values: list[str], args: argparse.Namespace):
 QUALIFIER_HANDLERS: dict[str, callable] = {
     'config': _apply_config_qualifier,
     'attr': _apply_attr_qualifier,
+    'timing': _apply_timing_qualifier,
 }
 
 # Internal-only handler used when parse_target_string recognises the

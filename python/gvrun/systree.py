@@ -36,6 +36,7 @@ from typing_extensions import Any, Callable
 from gvrun.builder import Builder
 from gvrun.parameter import (Parameter, get_parameter_arg_value, set_parameters_from_node,
     SystemTreeNodeParameter)
+import gvrun.timing
 
 __attribute_arg_values: dict[str, str] = {}
 __consumed_paths: set[str] = set()
@@ -256,6 +257,42 @@ class SystemTreeNode(SystemTreeNodeParameter):
         if desc is not None:
             resolved = get_parameter_arg_value(desc.full_name)
             self.__set_parameter(name, resolved)
+
+    def set_timing_level(self, level: str) -> None:
+        """Set the timing-accuracy level of this node's subtree.
+
+        The level applies to this node and everything below it, unless a
+        deeper node sets its own. Models that exist in several timing
+        flavours read it through :meth:`get_timing_level` at generation
+        time. See :mod:`gvrun.timing` for the available levels and the
+        full precedence rules.
+
+        Parameters
+        ----------
+        level (str): One of ``gvrun.timing.LEVELS`` ('functional', 'timed', 'cycle').
+        """
+        gvrun.timing.check_level(level)
+        self._gv_timing_level = level
+
+    def get_timing_level(self, supported: "list[str] | None" = None) -> str:
+        """Resolve the timing-accuracy level applying to this node.
+
+        Returns the level set on this node or its nearest ancestor via
+        :meth:`set_timing_level` or a CLI ``timing.`` qualifier, else the
+        global ``timing`` parameter (``name:timing=<level>`` in the target
+        string), else ``gvrun.timing.DEFAULT_LEVEL``.
+
+        Parameters
+        ----------
+        supported (list[str] | None): Levels this model implements. When given,
+            the resolved level is snapped to the nearest supported one
+            (preferring less accurate, see ``gvrun.timing.nearest_supported``).
+
+        Returns
+        -------
+        str : The resolved timing level.
+        """
+        return gvrun.timing.resolve_level(self, supported)
 
     def set_attributes(self, attributes: Config):
         """Set the attributes of this node.
