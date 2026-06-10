@@ -163,6 +163,7 @@ def _render_tree_cpp(component) -> str:
     config_decls = []   # config struct declarations (constexpr when frozen-only, static otherwise)
     runtime_decls = []  # runtime-field metadata tables
     binding_decls = []  # binding array declarations
+    mapping_decls = []  # address-mapping metadata tables
     array_decls = []    # children array declarations
     node_decls = []     # node declarations
 
@@ -302,6 +303,31 @@ def _render_tree_cpp(component) -> str:
                 runtime_ptr = rt_var
                 num_runtime_fields = str(len(runtime_fields))
 
+        # Emit address-mapping metadata if the config carries a `mappings`
+        # list whose entries expose name/base/size (router-style configs).
+        # Informational only: lets tools (e.g. the GUI) show memory maps.
+        mappings_ptr = 'nullptr'
+        num_mappings = '0'
+        maps = getattr(node['config_instance'], 'mappings', None) \
+            if node['config_instance'] is not None else None
+        if maps:
+            entries = []
+            for m in maps:
+                mname = getattr(m, 'name', None)
+                if mname is None:
+                    continue
+                mbase = int(getattr(m, 'base', 0) or 0)
+                msize = int(getattr(m, 'size', 0) or 0)
+                entries.append(f'    {{"{mname}", {mbase:#x}ULL, {msize:#x}ULL}},')
+            if entries:
+                arr_var = f'_tree_mappings_{ident}'
+                mapping_decls.append(
+                    f'static constexpr vp::TreeMapping {arr_var}[] = {{')
+                mapping_decls.extend(entries)
+                mapping_decls.append('};')
+                mappings_ptr = arr_var
+                num_mappings = str(len(entries))
+
         # Emit bindings array if any
         bindings_ptr = 'nullptr'
         num_bindings = '0'
@@ -333,7 +359,8 @@ def _render_tree_cpp(component) -> str:
 
         expr = (f'{{{name_str}, {config_ptr}, {children_ptr}, {num_children}, '
                 f'{vp_comp}, {bindings_ptr}, {num_bindings}, '
-                f'{runtime_ptr}, {num_runtime_fields}}}')
+                f'{runtime_ptr}, {num_runtime_fields}, '
+                f'{mappings_ptr}, {num_mappings}}}')
 
         # Root node gets its own declaration
         if path == '':
@@ -358,6 +385,10 @@ def _render_tree_cpp(component) -> str:
     for decl in runtime_decls:
         lines.append(decl)
     if runtime_decls:
+        lines.append('')
+    for decl in mapping_decls:
+        lines.append(decl)
+    if mapping_decls:
         lines.append('')
     for decl in binding_decls:
         lines.append(decl)
