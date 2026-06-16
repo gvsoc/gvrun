@@ -55,6 +55,23 @@ def _path_to_ident(path: str) -> str:
     return re.sub(r'[^a-zA-Z0-9_]', '_', s)
 
 
+def _signature_label(sig):
+    """Human-readable label for a port signature, or None.
+
+    ``sig`` is either a legacy signature string, a ``gvsoc.signature.Signature``
+    instance, or None. Emitted into the compiled tree so tooling (the GUI model
+    view) can show each interface's protocol / wire type.
+    """
+    if sig is None:
+        return None
+    if isinstance(sig, str):
+        return sig
+    label = getattr(sig, 'label', None)
+    if callable(label):
+        return sig.label()
+    return getattr(sig, 'tag', None) or type(sig).__name__
+
+
 def _collect_full_tree(component, path=''):
     """
     Walk the Python component tree and collect everything needed for C++ generation.
@@ -82,14 +99,19 @@ def _collect_full_tree(component, path=''):
     # Get bindings
     bindings = []
     for binding in getattr(component, 'bindings', []):
-        # binding is [master_comp, master_port, slave_comp, slave_port, master_props, slave_props]
+        # binding is [master_comp, master_port, slave_comp, slave_port,
+        #             master_props, slave_props, master_signature, slave_signature, ...]
+        # (signatures present only on the gvrun2 systree; absent on legacy gvrun)
         master_comp_obj = binding[0]
         master_port_name = binding[1]
         slave_comp_obj = binding[2]
         slave_port_name = binding[3]
         master_name = 'self' if master_comp_obj is component else master_comp_obj.name
         slave_name = 'self' if slave_comp_obj is component else slave_comp_obj.name
-        bindings.append((master_name, master_port_name, slave_name, slave_port_name))
+        master_sig = _signature_label(binding[6]) if len(binding) > 6 else None
+        slave_sig = _signature_label(binding[7]) if len(binding) > 7 else None
+        bindings.append((master_name, master_port_name, slave_name, slave_port_name,
+                         master_sig, slave_sig))
 
     node = {
         'name': getattr(component, 'name', '') or '',
@@ -332,10 +354,16 @@ def _render_tree_cpp(component) -> str:
         bindings_ptr = 'nullptr'
         num_bindings = '0'
         if node['bindings']:
+            def _cstr(s):
+                if s is None:
+                    return 'nullptr'
+                return '"' + s.replace('\\', '\\\\').replace('"', '\\"') + '"'
             arr_var = f'_bindings_{ident}'
             binding_decls.append(f'static constexpr vp::TreeBinding {arr_var}[] = {{')
-            for mc, mp, sc, sp in node['bindings']:
-                binding_decls.append(f'    {{"{mc}", "{mp}", "{sc}", "{sp}"}},')
+            for mc, mp, sc, sp, msig, ssig in node['bindings']:
+                binding_decls.append(
+                    f'    {{"{mc}", "{mp}", "{sc}", "{sp}", '
+                    f'{_cstr(msig)}, {_cstr(ssig)}}},')
             binding_decls.append('};')
             bindings_ptr = arr_var
             num_bindings = str(len(node['bindings']))
