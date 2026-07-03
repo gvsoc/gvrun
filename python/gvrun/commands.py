@@ -67,6 +67,12 @@ comp_generate = True
 def load_config(target: SystemTreeNode|None, args: argparse.Namespace):
     if target is not None:
         _ = BuildParameter(target, 'platform', args.platform, 'Platform providing the target')
+        # Mirror the --memcheck run flag (registered by the gvsoc runner) as a top
+        # property so OS layers can enable their allocator instrumentation at build
+        # time. getattr keeps this generic: platforms whose runner does not add
+        # --memcheck simply see False.
+        _ = BuildParameter(target, 'memcheck', getattr(args, 'memcheck', False),
+            'Memory checking enabled (mirrors the --memcheck run flag)')
         _ = BuildParameter(target, 'builddir', os.path.join(args.work_dir, 'build'), 'Build directory')
         _ = BuildParameter(target, 'timing', gvrun.timing.get_global_level(),
             'Default timing-accuracy level applied to all models '
