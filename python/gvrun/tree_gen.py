@@ -183,6 +183,7 @@ def _render_tree_cpp(component) -> str:
     # We collect all declarations bottom-up
     list_decls = []     # constexpr arrays for list-of-Config fields (emitted before the parent's struct init)
     config_decls = []   # config struct declarations (constexpr when frozen-only, static otherwise)
+    elem_field_decls = []  # element field tables of runtime list fields
     runtime_decls = []  # runtime-field metadata tables
     binding_decls = []  # binding array declarations
     mapping_decls = []  # address-mapping metadata tables
@@ -224,6 +225,44 @@ def _render_tree_cpp(component) -> str:
         return '{' + ', '.join(values) + '}'
 
     _list_counter = [0]
+
+    # One RuntimeField table per element class of runtime list fields,
+    # shared by every runtime list of that element type
+    _elem_field_tables = {}
+
+    def _emit_elem_fields(elem_cls) -> tuple:
+        """Emit (once) the RuntimeField table describing the fields of one
+        element struct of a runtime list, and return (identifier, count).
+
+        Element fields are restricted to scalars and strings: the engine
+        fills each element from flat ``<key>/<index>/<subfield>`` entries
+        of the runtime config file.
+        """
+        if elem_cls in _elem_field_tables:
+            return _elem_field_tables[elem_cls]
+
+        elem_name = elem_cls.__name__
+        elem_flds = get_config_fields(elem_cls)
+        for fld in elem_flds:
+            if fld['cpp_type'] == 'list':
+                raise RuntimeError(
+                    f'Runtime list element class {elem_name} has a list field '
+                    f'({fld["name"]}), only scalar and string fields are '
+                    f'supported inside runtime lists')
+
+        var_name = f'_runtime_elem_fields_{len(_elem_field_tables)}'
+        elem_field_decls.append(
+            f'static constexpr vp::RuntimeField {var_name}[] = {{')
+        for fld in elem_flds:
+            enum_name = runtime_field_enum(fld['cpp_type'])
+            elem_field_decls.append(
+                f'    {{"{fld["name"]}", '
+                f'(unsigned int)offsetof({elem_name}, {fld["name"]}), '
+                f'{enum_name}}},')
+        elem_field_decls.append('};')
+
+        _elem_field_tables[elem_cls] = (var_name, len(elem_flds))
+        return _elem_field_tables[elem_cls]
 
     def _emit_list_array(elem_cls, items) -> str:
         """Emit a static constexpr array of ``elem_cls`` and return its identifier.
@@ -272,15 +311,25 @@ def _render_tree_cpp(component) -> str:
             has_runtime = any(fld['runtime'] for fld in fld_list)
             for fld in fld_list:
                 if fld['cpp_type'] == 'list':
+                    if fld['runtime']:
+                        # Runtime lists are overlaid from the per-run runtime
+                        # config file at component construction; emit an
+                        # empty placeholder so the live values never enter
+                        # the compiled tree nor its signature.
+                        values.append('0')
+                        values.append('nullptr')
+                        runtime_fields.append(fld)
+                        continue
                     items = getattr(node['config_instance'], fld['name'], []) or []
                     arr_expr = _emit_list_array(fld['list_elem_cls'], items)
                     values.append(str(len(items)))
                     values.append(arr_expr)
                     continue
                 if fld['runtime']:
-                    # Runtime fields are overlaid from JSON at component
-                    # construction; emit a zero/nullptr placeholder here so
-                    # the aggregate initializer stays well-formed.
+                    # Runtime fields are overlaid from the per-run runtime
+                    # config file at component construction; emit the class
+                    # default here so the aggregate initializer stays
+                    # well-formed and the signature is value-independent.
                     cv = cpp_value(fld['default'], fld['cpp_type'])
                     if cv is None:
                         if fld['cpp_type'] == 'const char *':
@@ -292,8 +341,7 @@ def _render_tree_cpp(component) -> str:
                         else:
                             cv = '0'
                     values.append(cv)
-                    enum_name = runtime_field_enum(fld['cpp_type'])
-                    runtime_fields.append((fld['name'], enum_name))
+                    runtime_fields.append(fld)
                     continue
                 val = getattr(node['config_instance'], fld['name'], fld['default'])
                 if fld['cpp_type'] == 'int64_t' and isinstance(val, float):
@@ -314,13 +362,28 @@ def _render_tree_cpp(component) -> str:
             if runtime_fields:
                 rt_var = f'_runtime_fields_{ident}'
                 type_name = node['config_cls'].__name__
+                entries = []
+                for fld in runtime_fields:
+                    fname = fld['name']
+                    if fld['cpp_type'] == 'list':
+                        elem_cls = fld['list_elem_cls']
+                        elem_var, num_elem = _emit_elem_fields(elem_cls)
+                        entries.append(
+                            f'    {{"{fname}", '
+                            f'(unsigned int)offsetof({type_name}, {fname}_count), '
+                            f'vp::RUNTIME_LIST, '
+                            f'(unsigned int)offsetof({type_name}, {fname}), '
+                            f'(unsigned int)sizeof({elem_cls.__name__}), '
+                            f'{elem_var}, {num_elem}}},')
+                    else:
+                        enum_name = runtime_field_enum(fld['cpp_type'])
+                        entries.append(
+                            f'    {{"{fname}", '
+                            f'(unsigned int)offsetof({type_name}, {fname}), '
+                            f'{enum_name}}},')
                 runtime_decls.append(
                     f'static constexpr vp::RuntimeField {rt_var}[] = {{')
-                for fname, enum_name in runtime_fields:
-                    runtime_decls.append(
-                        f'    {{"{fname}", '
-                        f'(unsigned int)offsetof({type_name}, {fname}), '
-                        f'{enum_name}}},')
+                runtime_decls.extend(entries)
                 runtime_decls.append('};')
                 runtime_ptr = rt_var
                 num_runtime_fields = str(len(runtime_fields))
@@ -409,6 +472,10 @@ def _render_tree_cpp(component) -> str:
     for decl in config_decls:
         lines.append(decl)
     if config_decls:
+        lines.append('')
+    for decl in elem_field_decls:
+        lines.append(decl)
+    if elem_field_decls:
         lines.append('')
     for decl in runtime_decls:
         lines.append(decl)

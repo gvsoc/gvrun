@@ -152,14 +152,16 @@ def get_config_fields(config_cls):
             continue
         resolved_type = type_hints.get(f.name, f.type)
 
-        elem_cls = _list_elem_dataclass(resolved_type, config_cls)
+        # Unwrap Annotated so a field typed Annotated[list[X], Runtime] is
+        # recognized as a list like a bare list[X] would be
+        elem_cls = _list_elem_dataclass(unwrap_annotated(resolved_type), config_cls)
         if elem_cls is not None:
             result.append({
                 'name': f.name,
                 'cpp_type': 'list',
                 'list_elem_cls': elem_cls,
                 'default': None,
-                'runtime': False,
+                'runtime': is_runtime_annotation(resolved_type),
             })
             continue
 
