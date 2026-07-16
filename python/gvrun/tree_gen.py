@@ -131,13 +131,16 @@ def _collect_full_tree(component, path=''):
 
 
 def _add_class_includes(cls, includes: set) -> None:
-    """Add the header for ``cls`` and any nested list-element configs to *includes*."""
+    """Add the header for ``cls`` and any nested list-element or by-value
+    nested configs to *includes*."""
     if cls is None:
         return
     includes.add(_header_include_path(cls))
     for fld in get_config_fields(cls):
         if fld['cpp_type'] == 'list':
             _add_class_includes(fld['list_elem_cls'], includes)
+        elif fld['cpp_type'] == 'nested':
+            _add_class_includes(fld['nested_cls'], includes)
 
 
 def _collect_includes(node) -> set:
@@ -207,6 +210,12 @@ def _render_tree_cpp(component) -> str:
                 values.append(str(len(getattr(instance, fld['name'], []) or [])))
                 values.append(sub_arr)
                 continue
+            if fld['cpp_type'] == 'nested':
+                nested = getattr(instance, fld['name'], None)
+                # {} value-initializes the nested struct (all-zero tables)
+                values.append(_format_aggregate(fld['nested_cls'], nested)
+                    if nested is not None else '{}')
+                continue
             val = getattr(instance, fld['name'], fld['default'])
             if fld['cpp_type'] == 'int64_t' and isinstance(val, float):
                 val = int(round(val))
@@ -244,11 +253,11 @@ def _render_tree_cpp(component) -> str:
         elem_name = elem_cls.__name__
         elem_flds = get_config_fields(elem_cls)
         for fld in elem_flds:
-            if fld['cpp_type'] == 'list':
+            if fld['cpp_type'] in ('list', 'nested'):
                 raise RuntimeError(
-                    f'Runtime list element class {elem_name} has a list field '
-                    f'({fld["name"]}), only scalar and string fields are '
-                    f'supported inside runtime lists')
+                    f'Runtime list element class {elem_name} has a '
+                    f'{fld["cpp_type"]} field ({fld["name"]}), only scalar '
+                    f'and string fields are supported inside runtime lists')
 
         var_name = f'_runtime_elem_fields_{len(_elem_field_tables)}'
         elem_field_decls.append(
@@ -324,6 +333,12 @@ def _render_tree_cpp(component) -> str:
                     arr_expr = _emit_list_array(fld['list_elem_cls'], items)
                     values.append(str(len(items)))
                     values.append(arr_expr)
+                    continue
+                if fld['cpp_type'] == 'nested':
+                    nested = getattr(node['config_instance'], fld['name'], None)
+                    # {} value-initializes the nested struct (all-zero tables)
+                    values.append(_format_aggregate(fld['nested_cls'], nested)
+                        if nested is not None else '{}')
                     continue
                 if fld['runtime']:
                     # Runtime fields are overlaid from the per-run runtime

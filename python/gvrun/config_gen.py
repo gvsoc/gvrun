@@ -125,6 +125,24 @@ def _list_elem_dataclass(resolved_type, owner_cls):
     return elem
 
 
+def _nested_dataclass(resolved_type, owner_cls):
+    """If ``resolved_type`` is a plain-data Config dataclass, return it. Else None.
+
+    Only classes declaring ``_defer_parent_init = True`` qualify: that marker
+    distinguishes pure-data configs (power tables, sync points, ...), which are
+    lowered to a nested struct inside the parent's generated struct, from
+    structural configs (buses, memories, sub-systems), which describe the
+    config *tree* and must not be inlined.
+    """
+    if isinstance(resolved_type, str):
+        resolved_type = _resolve_forward_ref(resolved_type, owner_cls)
+    if resolved_type is None or not is_dataclass(resolved_type):
+        return None
+    if not getattr(resolved_type, '_defer_parent_init', False):
+        return None
+    return resolved_type
+
+
 def get_config_fields(config_cls):
     """Get the list of packable fields from a Config dataclass.
 
@@ -136,6 +154,11 @@ def get_config_fields(config_cls):
                   the element dataclass. Generates a (count, pointer) pair
                   in the C++ struct; the array itself is materialised by
                   ``tree_gen``.
+    * nested    — ``cpp_type == 'nested'`` with ``nested_cls`` pointing at a
+                  plain-data Config dataclass (one declaring
+                  ``_defer_parent_init = True``). Generates a by-value nested
+                  struct member, materialised inline by ``tree_gen``. Always
+                  frozen: Runtime-annotated nested fields are rejected.
 
     Used by both header generation and tree generation.
     """
@@ -162,6 +185,22 @@ def get_config_fields(config_cls):
                 'list_elem_cls': elem_cls,
                 'default': None,
                 'runtime': is_runtime_annotation(resolved_type),
+            })
+            continue
+
+        nested_cls = _nested_dataclass(unwrap_annotated(resolved_type), config_cls)
+        if nested_cls is not None:
+            if is_runtime_annotation(resolved_type):
+                raise RuntimeError(
+                    f'{config_cls.__name__}.{f.name}: nested config fields '
+                    f'cannot be Runtime-annotated, they are compiled into '
+                    f'the platform tree')
+            result.append({
+                'name': f.name,
+                'cpp_type': 'nested',
+                'nested_cls': nested_cls,
+                'default': None,
+                'runtime': False,
             })
             continue
 
@@ -238,11 +277,14 @@ def generate_cpp_header(config_cls, output_path: str = None) -> str:
     docstring = config_cls.__doc__ or f'Configuration struct for {class_name}.'
     docstring = textwrap.dedent(docstring).strip()
 
-    # Pull in headers for any nested Config types appearing as list elements.
+    # Pull in headers for any nested Config types appearing as list elements
+    # or as by-value nested structs.
     nested_includes = []
     for fld in field_list:
         if fld['cpp_type'] == 'list':
             nested_includes.append(_header_include_path(fld['list_elem_cls']))
+        elif fld['cpp_type'] == 'nested':
+            nested_includes.append(_header_include_path(fld['nested_cls']))
 
     lines = []
     lines.append('/*')
@@ -274,6 +316,8 @@ def generate_cpp_header(config_cls, output_path: str = None) -> str:
             elem_name = fld['list_elem_cls'].__name__
             lines.append(f'    size_t {fld["name"]}_count;')
             lines.append(f'    const {elem_name} *{fld["name"]};')
+        elif fld['cpp_type'] == 'nested':
+            lines.append(f'    {fld["nested_cls"].__name__} {fld["name"]};')
         else:
             lines.append(f'    {fld["cpp_type"]} {fld["name"]};')
 
