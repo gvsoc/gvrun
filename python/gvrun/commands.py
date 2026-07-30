@@ -57,6 +57,8 @@ commands = [
     ['compile'     , 'Build executables for the target'],
     ['build'       , 'Execute the commands image, flash and compile'],
     ['all'         , 'Execute the commands build and run'],
+    ['dump-asm'    , 'Recompile if needed and dump a disassembly (.s) and size report '
+                     '(.size) for each executable'],
     ['target_gen'  , 'Generate files required for compiling target'],
     ['diagram'     , 'Generate a Graphviz architecture diagram of the target'],
 ]
@@ -267,6 +269,24 @@ def compile(target: Target, args: argparse.Namespace):
     if retval != 0:
         raise RuntimeError(f'Compilation returned an error (exitcode: {retval})')
 
+def dump_asm(target: Target, args: argparse.Namespace):
+    # Recompile first (incremental: only rebuilds/relinks executables whose sources
+    # changed) so the dump reflects the up-to-date binary.
+    compile(target, args)
+
+    builder = Builder(args.jobs, args.verbose)
+    try:
+        target.dump_asm_all(builder, os.path.join(args.work_dir, 'build'))
+    except:
+        builder.stop()
+        raise
+
+    retval = builder.wait_completion()
+    builder.stop()
+
+    if retval != 0:
+        raise RuntimeError(f'Dumping asm returned an error (exitcode: {retval})')
+
 def generate_diagram_cmd(target: Target, args: argparse.Namespace):
     from gvrun.diagram import generate_diagram
 
@@ -371,6 +391,10 @@ def handle_command(target: Target, command: str, args: argparse.Namespace):
         compile(target, args)
         if command == 'compile':
             return
+
+    if command == 'dump-asm':
+        dump_asm(target, args)
+        return
 
     if command in ['image', 'all', 'build']:
         if comp_generate:

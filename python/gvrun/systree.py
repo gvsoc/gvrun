@@ -841,6 +841,19 @@ class SystemTreeNode(SystemTreeNodeParameter):
 
         self._compile(builder, builddir)
 
+    def _dump_asm(self, builder: Builder, builddir: str):
+        """Dump-asm step, should be overriden by build process nodes producing an executable"""
+        _ = builder
+        _ = builddir
+        pass
+
+    def dump_asm_all(self, builder: Builder, builddir: str):
+        """Reserved for internal usage. Call the dump-asm step for every node of the child hierarchy"""
+        for child in self._get_childs():
+            child.dump_asm_all(builder, builddir)
+
+        self._dump_asm(builder, builddir)
+
     def target_gen(self, builddir:str):
         _ = builddir
         pass
