@@ -16,8 +16,9 @@ expect this layout:
 PMSIS finds this header by reading a little-endian offset from the first four
 bytes of the flash (``__pi_fs_get_fs_flash_opened``). Those four bytes are not
 ours: they are the boot image's ``next_section`` field, which points past the
-boot section and so at this header. A flash PMSIS mounts therefore always
-starts with a boot section, and this one must not write there.
+boot section and so at this header. A flash PMSIS mounts therefore starts with
+a boot section, or with a ``boot_pointer`` section when the platform has no
+boot image; either way this one must not write there.
 
 Ported from the legacy gapy ``PartitionTableSection``.
 """

@@ -9,3 +9,4 @@ from gvrun.flash.sections.readfs import ReadfsSection
 from gvrun.flash.sections.hostfs import HostfsSection
 from gvrun.flash.sections.app_binary import AppBinarySection
 from gvrun.flash.sections.partition_table import PartitionTableSection
+from gvrun.flash.sections.boot_pointer import BootPointerSection
