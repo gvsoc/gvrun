@@ -117,6 +117,16 @@ class FlashSection:
     def get_flash(self) -> Flash:
         return self.parent
 
+    def get_next_section(self) -> FlashSection | None:
+        """Return the section laid out right after this one, or None if last.
+
+        Only meaningful from ``finalize()`` onwards, once every offset and
+        size is known.
+        """
+        sections = self.get_flash().get_sections()
+        index = sections.index(self)
+        return sections[index + 1] if index + 1 < len(sections) else None
+
     def get_offset(self) -> int:
         return self.offset
 

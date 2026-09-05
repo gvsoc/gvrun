@@ -9,15 +9,15 @@
 Consumers (e.g. PMSIS's ``pi_partition_table_load`` / ``pi_fs_mount``)
 expect this layout:
 
-- 4 bytes at the very start of the flash: little-endian offset pointing to
-  the partition table header (see ``flash_partition.c``).
-- At that offset, a 32-byte header (magic 0x02BA, format version, nb
-  entries, ...).
+- A 32-byte header (magic 0x02BA, format version, nb entries, ...).
 - N * 32-byte entries (magic 0x01BA, type, subtype, offset, size, 16-byte
   label, flags).
 
-This section includes the leading 4-byte self-pointer, so placing it as the
-first section of a flash makes PMSIS discover it correctly.
+PMSIS finds this header by reading a little-endian offset from the first four
+bytes of the flash (``__pi_fs_get_fs_flash_opened``). Those four bytes are not
+ours: they are the boot image's ``next_section`` field, which points past the
+boot section and so at this header. A flash PMSIS mounts therefore always
+starts with a boot section, and this one must not write there.
 
 Ported from the legacy gapy ``PartitionTableSection``.
 """
@@ -45,7 +45,6 @@ class PartitionTableSection(FlashSection):
     def __init__(self, name: str):
         super().__init__(name)
         self._followers: list[FlashSection] = []
-        self._pointer: CStruct | None = None
         self._header: CStruct | None = None
         self._entries: list[CStruct] = []
 
@@ -57,21 +56,12 @@ class PartitionTableSection(FlashSection):
         self._followers = all_sections[idx + 1:]
 
         top = CStructParent('partition_table', parent=self)
-        # 4-byte pointer at the very start of the flash, read by PMSIS to
-        # discover the real header.
-        self._pointer = CStruct('pointer', top)
-        self._pointer.add_field('table_offset', 'I')
-
         self._header = _make_header(top)
         self._entries = [_make_entry(top, i) for i, _ in enumerate(self._followers)]
 
     def finalize(self):
         if self._header is None:
             return
-
-        # Point at the partition table header, which sits right after the
-        # 4-byte pointer at the start of this section.
-        self._pointer.set_field('table_offset', self._header.get_offset())
 
         self._header.set_field('magic_number', _PARTITION_TABLE_HEADER_MAGIC)
         self._header.set_field('partition_table_version', _PARTITION_TABLE_FORMAT_VERSION)
