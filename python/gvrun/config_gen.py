@@ -143,8 +143,17 @@ def _nested_dataclass(resolved_type, owner_cls):
     return resolved_type
 
 
+# get_config_fields() results per Config class. The field list only depends on
+# the class, and resolving its type hints is expensive: the tree generation
+# asks for the fields of every config instance of a platform.
+_config_fields_cache = {}
+
+
 def get_config_fields(config_cls):
     """Get the list of packable fields from a Config dataclass.
+
+    The result is shared between the calls for a class, callers must not
+    modify it.
 
     Returns a list of dicts. Three flavours of entry are produced:
 
@@ -164,10 +173,16 @@ def get_config_fields(config_cls):
     """
     # Resolve PEP 563 string annotations so Annotated[T, Runtime] is a
     # real object (not the string "Annotated[T, Runtime]").
+    cached = _config_fields_cache.get(config_cls)
+    if cached is not None:
+        return cached
+
     try:
         type_hints = get_type_hints(config_cls, include_extras=True)
+        hints_resolved = True
     except Exception:
         type_hints = {}
+        hints_resolved = False
 
     result = []
     for f in fields(config_cls):
@@ -220,6 +235,9 @@ def get_config_fields(config_cls):
             'default': default_val,
             'runtime': is_runtime_annotation(resolved_type),
         })
+    # Unresolved hints may resolve later, once their modules are loaded
+    if hints_resolved:
+        _config_fields_cache[config_cls] = result
     return result
 
 
