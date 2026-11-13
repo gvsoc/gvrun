@@ -95,8 +95,9 @@ def main(argv: list[str] | None = None) -> int:
     _ = parser.add_argument('--config-opt', dest='config_opt', action="append", default=[],
         help='specify target options (backward compatibility)')
 
-    _ = parser.add_argument("--attribute", dest="attributes", default=[],
-        action="append", help="specify the value of an attribute")
+    # Deprecated alias of --parameter, kept for the existing command lines
+    _ = parser.add_argument("--attribute", dest="parameters", action="append",
+        help=argparse.SUPPRESS)
 
     _ = parser.add_argument("--flash-content", dest="flash_contents", default=[],
         action="append",
@@ -202,8 +203,6 @@ def main(argv: list[str] | None = None) -> int:
                 target_kwargs["options"] = args.config_opt + args.target_opt
 
             gvrun.commands.parse_parameter_arg_values(args.parameters)
-
-            gvrun.commands.parse_attribute_arg_values(args.attributes)
 
             selected_target = target_class(**target_kwargs)
 

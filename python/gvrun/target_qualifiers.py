@@ -15,16 +15,13 @@ colons. Chosen for shell-friendliness — no parentheses to quote.
 
 One key=value per qualifier; repeat the qualifier to set multiple keys.
 
-Bare form (no qualifier prefix) is accepted as a shortcut for
-``--parameter`` and supports comma-separated multi-key lists — kept for
-backward compatibility with existing Makefile-driven tests that build
-the target string by joining options. It feeds the same parameter
-registry as ``--parameter``, so it is matched against declared
-``TargetParameter`` / ``BuildParameter`` / ``ArchParameter`` instances:
+Bare form (no qualifier prefix) sets parameters and supports
+comma-separated multi-key lists — kept for backward compatibility with
+existing Makefile-driven tests that build the target string by joining
+options. It is matched against declared ``TargetParameter`` /
+``BuildParameter`` / ``ArchParameter`` instances, like ``--parameter``:
 
     target:access_type=rw,synchronous=false,target_bw=4
-      == --parameter access_type=rw --parameter synchronous=false \\
-         --parameter target_bw=4
 
 Available qualifiers:
     config  — Override fields on the target's top ``config_tree.Config``.
@@ -160,13 +157,14 @@ def _apply_timing_qualifier(values: list[str], args: argparse.Namespace):
 
 
 def _apply_bare_qualifier(values: list[str], args: argparse.Namespace):
-    """Route bare ``key=value`` entries to ``--parameter``.
+    """Route bare ``key=value`` entries to the target-string parameters.
 
-    Appends to ``args.parameters`` so the later ``parse_parameter_arg_values``
-    pass picks them up; lands in the same registry consulted by
-    ``TargetParameter`` / ``BuildParameter`` / ``ArchParameter`` lookups.
+    They are consulted by the same ``TargetParameter`` / ``BuildParameter`` /
+    ``ArchParameter`` lookups as ``--parameter``, which wins over them. Unlike
+    ``--parameter``, they do not set the runtime config fields.
     """
-    args.parameters.extend(values)
+    import gvrun.parameter
+    gvrun.parameter.set_target_string_parameters(values)
 
 
 QUALIFIER_HANDLERS: dict[str, callable] = {

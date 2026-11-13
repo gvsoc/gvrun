@@ -7,8 +7,7 @@
 """Hierarchical timing-accuracy levels.
 
 A timing level is a speed/accuracy budget the user assigns to the whole
-platform (``--target "name:timing=<level>"``, also reachable as
-``--parameter timing=<level>``) or to a subtree of it
+platform (``--target "name:timing=<level>"``) or to a subtree of it
 (``--target "name:timing.<component/path>=<level>"`` or
 ``node.set_timing_level(...)`` from a generator). Models that exist in
 several timing flavours resolve their flavour from the level at
@@ -42,7 +41,7 @@ Precedence, highest first:
    ``Iss(timed=...)``)
 2. CLI ``timing.`` qualifier on the nearest node
 3. generator ``set_timing_level()`` on the nearest node
-4. global ``timing`` parameter (``name:timing=<level>`` / ``--parameter``)
+4. global ``timing`` parameter (``name:timing=<level>``)
 5. ``DEFAULT_LEVEL``
 """
 

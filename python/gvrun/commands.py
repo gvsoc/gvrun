@@ -37,7 +37,6 @@ import gvrun.systree
 import gvrun.config
 import gvrun.attribute
 import gvrun.timing
-from gvrun.attribute import set_attributes
 from gvrun.parameter import set_parameters, BuildParameter
 from gvrun.builder import Builder, CommandInterface
 from gvrun.target import Target
@@ -143,8 +142,7 @@ def _enumerate_top_config_paths(target: SystemTreeNode) -> set[str]:
 
 
 def check_overrides_consumed():
-    """Raise if any ``config(...)``, ``attr(...)`` or ``--attribute`` key
-    went unused.
+    """Raise if any ``config(...)`` or ``attr(...)`` key went unused.
 
     Called from ``load_config`` after ``target.configure_all()`` — by that
     point every ``Config`` has been instantiated and every
@@ -170,7 +168,7 @@ def check_overrides_consumed():
                 "the target root; use attr. for per-component "
                 "attributes reached via component paths.")
 
-    # --- attr(...) and --attribute — component attributes ----------------
+    # --- attr(...) — component attributes --------------------------------
     systree_submitted = gvrun.systree.get_attribute_arg_keys()
     systree_consumed = gvrun.systree.get_consumed_attribute_paths()
     attr_submitted = gvrun.attribute.get_attribute_arg_keys()
@@ -187,7 +185,7 @@ def check_overrides_consumed():
             for k in unknown_attr
         ]
         raise RuntimeError(
-            "Unknown attr./--attribute override(s): "
+            "Unknown attr. override(s): "
             + ", ".join(hints)
             + ". No matching component attribute in the target's tree.")
 
@@ -444,21 +442,6 @@ def track_config_overrides(values: list[str]):
         key, _ = prop.split('=', 1)
         _config_override_keys.append(key)
 
-
-def parse_attribute_arg_values(attributes: list[str]):
-    """Override component attributes only.
-
-    Same scope as ``attr(...)`` target qualifier — feeds both:
-
-    - ``gvrun.systree`` (picked up by ``Component.__init__`` for
-      Config-backed component properties).
-    - ``gvrun.attribute`` (picked up by ``Value.__init__`` for legacy
-      Tree/Value hierarchies).
-
-    Unmatched paths are reported by :func:`check_overrides_consumed`.
-    """
-    gvrun.systree.set_attributes(attributes)
-    set_attributes(attributes)
 
 def handle_commands(target: Target, args: argparse.Namespace):
 

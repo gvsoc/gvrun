@@ -145,6 +145,14 @@ class Value(Attr):
         if arg_value is not None:
             self.value = arg_value
 
+        # --parameter only applies to the run: the platform compiled for the target
+        # string is not rebuilt, so it must only set values read at run time (e.g. a
+        # file loaded by a Runtime config field), not the platform shape.
+        import gvrun.parameter
+        param_value = gvrun.parameter.get_cmdline_parameter_value(self._path)
+        if param_value is not None:
+            self.value = param_value
+
         if self._allowed_values is not None:
             if self.value not in self._allowed_values:
                 raise RuntimeError(f'Trying to set attribute to invalid value '

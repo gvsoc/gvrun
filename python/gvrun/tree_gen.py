@@ -32,7 +32,6 @@ Called during cmake configure time by the gapy 'components' command.
 """
 
 from __future__ import annotations
-import hashlib
 import os
 import re
 from dataclasses import fields, is_dataclass
@@ -163,10 +162,8 @@ def _collect_includes(node) -> set:
 def _render_tree_cpp(component) -> str:
     """Render the per-target tree.cpp content from a Python component tree.
 
-    Returns the file contents as a string. ``generate_tree_cpp`` writes it
-    to disk; ``compute_signature`` hashes it for the runtime mismatch
-    check (e.g. when ``--attribute`` reshapes the systree between build
-    and run).
+    Returns the file contents as a string, written to disk by
+    ``generate_tree_cpp``.
     """
     tree = _collect_full_tree(component)
 
@@ -324,7 +321,7 @@ def _render_tree_cpp(component) -> str:
                         # Runtime lists are overlaid from the per-run runtime
                         # config file at component construction; emit an
                         # empty placeholder so the live values never enter
-                        # the compiled tree nor its signature.
+                        # the compiled tree.
                         values.append('0')
                         values.append('nullptr')
                         runtime_fields.append(fld)
@@ -344,7 +341,7 @@ def _render_tree_cpp(component) -> str:
                     # Runtime fields are overlaid from the per-run runtime
                     # config file at component construction; emit the class
                     # default here so the aggregate initializer stays
-                    # well-formed and the signature is value-independent.
+                    # well-formed and the compiled tree value-independent.
                     cv = cpp_value(fld['default'], fld['cpp_type'])
                     if cv is None:
                         if fld['cpp_type'] == 'const char *':
@@ -521,26 +518,8 @@ def _render_tree_cpp(component) -> str:
     return '\n'.join(lines)
 
 
-def compute_signature(component) -> str:
-    """SHA256 hex digest of the tree.cpp that would be written for ``component``.
-
-    Used by the launcher at run time to decide whether the installed
-    ``libplatform_tree_<target>.so`` (built against the default systree)
-    still matches the live systree (which may have been reshaped by
-    ``--attribute`` etc.). When the signature mismatches, the launcher
-    skips ``platform_tree`` so the engine falls back to the JSON path
-    instead of dlopen'ing a stale .so.
-    """
-    return hashlib.sha256(_render_tree_cpp(component).encode()).hexdigest()
-
-
 def generate_tree_cpp(component, output_path: str) -> None:
     """Generate a C++ file with the compiled component tree.
-
-    Also writes a ``<output_path>.sig`` sidecar containing the SHA256 of
-    the tree.cpp content. The CMake install step copies that sidecar
-    next to the compiled ``.so`` so the runtime can detect a stale
-    ``.so`` (e.g. when ``--attribute`` changes the systree shape).
 
     Parameters
     ----------
@@ -550,9 +529,7 @@ def generate_tree_cpp(component, output_path: str) -> None:
         Path to write the generated .cpp file.
     """
     content = _render_tree_cpp(component)
-    signature = hashlib.sha256(content.encode()).hexdigest()
     written = write_if_changed(output_path, content)
-    write_if_changed(output_path + '.sig', signature)
     if written:
         print(f'Generated {output_path}')
     else:

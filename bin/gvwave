@@ -10,7 +10,7 @@
 #     gvwave <file.fst|file.fsdb> [--layout FILE] [extra gvrun args...]
 #
 # Any unrecognised argument is forwarded verbatim to gvrun, so all of
-# gvrun's flags (--attribute, --parameter, --jobs, …) keep working.
+# gvrun's flags (--parameter, --jobs, …) keep working.
 
 set -e
 

@@ -730,14 +730,14 @@ class SystemTreeNode(SystemTreeNodeParameter):
 
     def __get_parameter(self, name: str, check: bool=True) -> Parameter | None:
         """Get a parameter"""
-        if name.find('/') != -1:
-            desc = None
+        # A parameter of this node can have '/' in its name (e.g. one named after an
+        # attribute path), so look for it before going down to the children
+        desc = self.__parameters.get(name)
+        if desc is None and name.find('/') != -1:
             comp_name, prop_name = name.split('/', 1)
             comp = self.get_child(comp_name)
             if comp is not None:
                 desc = comp.__get_parameter(prop_name)
-        else:
-            desc = self.__parameters.get(name)
         if check and desc is None:
             raise RuntimeError(f'Trying to get invalid parameter (name: {name})')
 

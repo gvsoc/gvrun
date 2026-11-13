@@ -25,7 +25,13 @@ class SystemTreeNodeParameter(Protocol):
     def get_path(self) -> str: ...
     def declare_parameter(self, descriptor: "Parameter") -> None: ...
 
+# Values given with --parameter. They only apply to the run, the platform
+# tree compiled for the target is not rebuilt, so they must not change it.
 __cmdline_parameter_values: dict[str,Any] = {}
+# Values given as bare KEY=VALUE qualifiers of the target string
+# (--target name:KEY=VALUE). Kept apart from --parameter, which also sets the
+# runtime config fields.
+__target_string_parameter_values: dict[str,Any] = {}
 __node_parameter_values: dict[str,Any] = {}
 
 def set_parameters(parameters: list[str]):
@@ -35,15 +41,33 @@ def set_parameters(parameters: list[str]):
         key, value = prop.split('=', 1)
         __cmdline_parameter_values[key] = value
 
+def set_target_string_parameters(parameters: list[str]):
+    global __target_string_parameter_values
+
+    for prop in parameters:
+        key, value = prop.split('=', 1)
+        __target_string_parameter_values[key] = value
+
 def set_parameters_from_node(parameters: list[tuple[str,Any]]):
     global __node_parameter_values
 
     for prop in parameters:
         __node_parameter_values[prop[0]] = prop[1]
 
+def get_cmdline_parameter_value(name: str) -> Any:
+    """Return the --parameter value given for name, or None."""
+    return __cmdline_parameter_values.get(name)
+
 def get_parameter_arg_value(name: str) -> Any:
-    # First return the value from command_line arguments as it overwrite the ones from the nodes
+    """Return the value given for the parameter name, or None.
+
+    The command line (--parameter) wins over the target string, which wins over the
+    values set by the system tree nodes.
+    """
     value = __cmdline_parameter_values.get(name)
+    if value is not None:
+        return value
+    value = __target_string_parameter_values.get(name)
     if value is not None:
         return value
     # If not set, return from nodes
