@@ -55,8 +55,6 @@ def _find_sdk_install_dir() -> Path | None:
     return None
 
 def main(argv: list[str] | None = None) -> int:
-    os.environ.setdefault('USE_GVRUN', '1')
-    os.environ.setdefault('USE_GVRUN2', '1')
 
     default_target = os.environ.get('GVRUN_TARGET')
     default_target_dirs = os.environ.get('GVRUN_TARGET_DIRS')
