@@ -37,6 +37,7 @@ import gvrun.systree
 import gvrun.config
 import gvrun.attribute
 import gvrun.timing
+import gvrun.parameter
 from gvrun.parameter import set_parameters, BuildParameter
 from gvrun.builder import Builder, CommandInterface
 from gvrun.target import Target
@@ -188,6 +189,15 @@ def check_overrides_consumed():
             "Unknown attr. override(s): "
             + ", ".join(hints)
             + ". No matching component attribute in the target's tree.")
+
+    # --- bare KEY=VALUE — target parameters -------------------------------
+    unknown_bare = gvrun.parameter.get_unconsumed_target_string_parameters()
+    if unknown_bare:
+        raise RuntimeError(
+            "Unknown target qualifier(s): "
+            + ", ".join(f"'{k}'" for k in unknown_bare)
+            + ". A bare KEY=VALUE qualifier sets a target parameter; use "
+            "attr.KEY=VALUE for a component attribute or config field.")
 
     # --- timing(...) — subtree timing levels ------------------------------
     unknown_timing = sorted(

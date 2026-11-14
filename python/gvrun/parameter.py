@@ -33,6 +33,8 @@ __cmdline_parameter_values: dict[str,Any] = {}
 # runtime config fields.
 __target_string_parameter_values: dict[str,Any] = {}
 __node_parameter_values: dict[str,Any] = {}
+# Target-string keys looked up by a parameter, to report the unmatched ones
+__consumed_target_string_parameters: set[str] = set()
 
 def set_parameters(parameters: list[str]):
     global __cmdline_parameter_values
@@ -54,6 +56,10 @@ def set_parameters_from_node(parameters: list[tuple[str,Any]]):
     for prop in parameters:
         __node_parameter_values[prop[0]] = prop[1]
 
+def get_unconsumed_target_string_parameters() -> list[str]:
+    """Return the target-string keys no parameter has looked up."""
+    return sorted(set(__target_string_parameter_values) - __consumed_target_string_parameters)
+
 def get_cmdline_parameter_value(name: str) -> Any:
     """Return the --parameter value given for name, or None."""
     return __cmdline_parameter_values.get(name)
@@ -64,6 +70,8 @@ def get_parameter_arg_value(name: str) -> Any:
     The command line (--parameter) wins over the target string, which wins over the
     values set by the system tree nodes.
     """
+    if name in __target_string_parameter_values:
+        __consumed_target_string_parameters.add(name)
     value = __cmdline_parameter_values.get(name)
     if value is not None:
         return value
