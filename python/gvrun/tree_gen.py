@@ -84,6 +84,7 @@ def _collect_full_tree(component, path=''):
         'config_instance': object or None,
         'vp_component': str or None,
         'bindings': [(master_comp, master_port, slave_comp, slave_port), ...],
+        'ports': [port_name, ...],
     }
     """
     config = getattr(component, '_component_config', None)
@@ -120,6 +121,9 @@ def _collect_full_tree(component, path=''):
         'config_instance': config if config_cls else None,
         'vp_component': vp_component,
         'bindings': bindings,
+        # All the ports of the component, the ones bound by its own bindings
+        # and the ones bound by its parent bindings
+        'ports': list(getattr(component, 'ports', {}).keys()),
     }
 
     for child_name, child in getattr(component, 'components', {}).items():
@@ -186,6 +190,7 @@ def _render_tree_cpp(component) -> str:
     elem_field_decls = []  # element field tables of runtime list fields
     runtime_decls = []  # runtime-field metadata tables
     binding_decls = []  # binding array declarations
+    port_decls = []     # port name array declarations
     mapping_decls = []  # address-mapping metadata tables
     array_decls = []    # children array declarations
     node_decls = []     # node declarations
@@ -443,6 +448,18 @@ def _render_tree_cpp(component) -> str:
             bindings_ptr = arr_var
             num_bindings = str(len(node['bindings']))
 
+        # Emit ports array if any
+        ports_ptr = 'nullptr'
+        num_ports = '0'
+        if node['ports']:
+            arr_var = f'_ports_{ident}'
+            port_decls.append(f'static constexpr const char *{arr_var}[] = {{')
+            for port in node['ports']:
+                port_decls.append(f'    "{port}",')
+            port_decls.append('};')
+            ports_ptr = arr_var
+            num_ports = str(len(node['ports']))
+
         # Emit children array if any
         children_ptr = 'nullptr'
         num_children = '0'
@@ -463,7 +480,8 @@ def _render_tree_cpp(component) -> str:
         expr = (f'{{{name_str}, {config_ptr}, {children_ptr}, {num_children}, '
                 f'{vp_comp}, {bindings_ptr}, {num_bindings}, '
                 f'{runtime_ptr}, {num_runtime_fields}, '
-                f'{mappings_ptr}, {num_mappings}}}')
+                f'{mappings_ptr}, {num_mappings}, '
+                f'{ports_ptr}, {num_ports}}}')
 
         # Root node gets its own declaration
         if path == '':
@@ -501,6 +519,10 @@ def _render_tree_cpp(component) -> str:
         lines.append(decl)
     if binding_decls:
         lines.append('')
+    for decl in port_decls:
+        lines.append(decl)
+    if port_decls:
+        lines.append('')
     for decl in array_decls:
         lines.append(decl)
     if array_decls:
@@ -508,6 +530,11 @@ def _render_tree_cpp(component) -> str:
     for decl in node_decls:
         lines.append(decl)
 
+    lines.append('')
+    lines.append('extern "C" int vp_platform_tree_version()')
+    lines.append('{')
+    lines.append('    return VP_COMPONENT_TREE_VERSION;')
+    lines.append('}')
     lines.append('')
     lines.append('extern "C" const vp::ComponentTreeNode *vp_get_platform_tree()')
     lines.append('{')
