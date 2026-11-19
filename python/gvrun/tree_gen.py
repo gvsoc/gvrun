@@ -556,8 +556,5 @@ def generate_tree_cpp(component, output_path: str) -> None:
         Path to write the generated .cpp file.
     """
     content = _render_tree_cpp(component)
-    written = write_if_changed(output_path, content)
-    if written:
+    if write_if_changed(output_path, content):
         print(f'Generated {output_path}')
-    else:
-        print(f'Up to date {output_path}')

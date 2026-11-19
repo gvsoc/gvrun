@@ -347,7 +347,5 @@ def generate_cpp_header(config_cls, output_path: str = None) -> str:
     if output_path:
         if write_if_changed(output_path, content):
             print(f'Generated {output_path}')
-        else:
-            print(f'Up to date {output_path}')
 
     return content
